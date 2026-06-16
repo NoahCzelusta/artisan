@@ -1,6 +1,6 @@
 cask "artisan" do
-  version "0.0.2"
-  sha256 "24646a52c77546f3ad3c7ecad5c5e71c2f3ed8336bcfdb0d9372cb13a0a63e12"
+  version "0.0.3"
+  sha256 "7a656957fd61dc2384b927ae7f568bc2f1ea3a46de184b5255e7d8948e341bbb"
 
   url "https://github.com/NoahCzelusta/artisan/releases/download/v#{version}/Artisan-v#{version}-macos-arm64.zip"
   name "Artisan"
