@@ -1,25 +1,33 @@
 # Release Distribution
 
-This project should keep local development and public distribution separate.
-The MVP can stay repo-local through `scripts/install-local.sh`; teammate
-distribution should move through signed, notarized release artifacts before a
-Homebrew Cask becomes the default install path.
+This project keeps local development, CI dry-runs, and trusted public
+distribution separate. The MVP can stay repo-local through
+`scripts/install-local.sh`; teammate distribution should move through signed,
+notarized release artifacts before a Homebrew Cask becomes the default install
+path.
 
 ## Current Artifact State
 
 - `scripts/build-artisan-app.sh` produces `Artisan.app` under `.build/release`.
+- `scripts/package-release.sh <version>` produces a versioned zip archive,
+  checksum file, and generated Homebrew cask under `dist/` by default.
+- `.github/workflows/ci.yml` runs functional gates and creates an uploadable
+  release-package dry run on pull requests and pushes to `main`.
+- `.github/workflows/release.yml` packages tag builds and publishes GitHub
+  Release assets for `v*` tags.
 - The current release app is a thin `arm64` bundle on this machine, not a
   universal binary.
-- Current local artifacts are ad hoc signed only. They are fine for development
-  and local testing, but not distribution-ready.
-- A pre-release Gatekeeper check currently fails on the local artifact, so we
-  should not hand this bundle to teammates as a trusted download.
+- If no Developer ID identity is provided, release packages are ad hoc signed
+  only. They are fine for CI validation and local testing, but not
+  distribution-ready.
+- Trusted teammate downloads still require Developer ID signing plus
+  notarization.
 
 ## Target Release Path
 
 1. Keep `scripts/install-local.sh` as the repo-local contributor install path.
-2. Add a release packaging script that builds `Artisan.app` and the `artisan`
-   CLI in release mode.
+2. Use `scripts/package-release.sh <version>` to build `Artisan.app` and the
+   `artisan` CLI in release mode.
 3. Sign both the app bundle and standalone CLI with a Developer ID Application
    certificate and hardened runtime.
 4. Package the signed app bundle and sibling CLI binary into a versioned archive
@@ -43,6 +51,62 @@ architecture-specific archives. Homebrew Cask supports architecture-specific
 URLs and checksums, but a universal archive is simpler for users if launch-time
 and binary-size impact stay acceptable.
 
+## CI
+
+CI is configured through GitHub Actions:
+
+- `scripts/run-ci.sh` runs the deterministic product, editor, highlighting,
+  packaging, release-plan, and workflow checks.
+- `.github/workflows/ci.yml` runs on pull requests, pushes to `main`, and manual
+  dispatch. It builds release products, runs `scripts/run-ci.sh`, creates a
+  release-package dry run, and uploads the zip/checksum/generated cask as a
+  workflow artifact.
+- `scripts/run-benchmarks.sh` remains the local product performance gate with
+  the aggressive benchmark targets in `benchmarks/targets.env`.
+
+CI intentionally does not require Developer ID signing secrets for every pull
+request. The package check produces an ad hoc signed archive to validate bundle
+shape, checksum generation, and Homebrew cask rendering.
+
+## Release Packaging
+
+Create a local dry-run package with:
+
+```bash
+ARTISAN_RELEASE_ALLOW_DIRTY=1 scripts/package-release.sh 0.1.0
+scripts/check-release-package.sh
+```
+
+For an actual trusted release, run the package script from a clean worktree and
+provide signing/notarization settings:
+
+```bash
+ARTISAN_CODESIGN_IDENTITY="Developer ID Application: <Team Name> (<Team ID>)" \
+ARTISAN_NOTARY_KEYCHAIN_PROFILE="artisan" \
+  scripts/package-release.sh 0.1.0
+```
+
+The script writes:
+
+```text
+dist/Artisan-v0.1.0-macos-arm64.zip
+dist/Artisan-v0.1.0-macos-arm64.zip.sha256
+dist/artisan.rb
+```
+
+Useful environment variables:
+
+- `ARTISAN_DIST_DIR`: alternate output directory.
+- `ARTISAN_RELEASE_REPOSITORY`: owner/repo used for generated GitHub release
+  URLs; defaults to `NoahCzelusta/artisan`.
+- `ARTISAN_RELEASE_URL`: fully override the generated cask URL.
+- `ARTISAN_RELEASE_ARCH`: override the archive architecture label.
+- `ARTISAN_BUILD_NUMBER`: override `CFBundleVersion`.
+- `ARTISAN_CODESIGN_IDENTITY`: Developer ID identity for hardened-runtime
+  signing. Without it, the script uses ad hoc signing.
+- `ARTISAN_NOTARY_KEYCHAIN_PROFILE`: `notarytool` keychain profile. Without it,
+  the script skips notarization.
+
 ## Signing And Notarization
 
 Apple's outside-the-Mac-App-Store path uses Developer ID signing plus optional
@@ -62,33 +126,10 @@ Required before trusted teammate downloads:
   API key credentials rather than a personal password.
 - A release script that validates every artifact before upload.
 
-The release script should eventually perform this shape of work:
+The release script performs this shape of work:
 
 ```bash
-VERSION="0.1.0"
-ARCHIVE="dist/Artisan-v${VERSION}-macos-arm64.zip"
-STAGE="$(mktemp -d)"
-
-scripts/build-artisan-app.sh
-ditto .build/release/Artisan.app "$STAGE/Artisan.app"
-install -m 0755 .build/release/artisan "$STAGE/artisan"
-
-codesign --force --options runtime --timestamp \
-  --sign "Developer ID Application: <Team Name> (<Team ID>)" \
-  "$STAGE/Artisan.app"
-codesign --force --options runtime --timestamp \
-  --sign "Developer ID Application: <Team Name> (<Team ID>)" \
-  "$STAGE/artisan"
-
-ditto -c -k --sequesterRsrc "$STAGE" "$ARCHIVE"
-xcrun notarytool submit "$ARCHIVE" --keychain-profile artisan --wait
-xcrun stapler staple "$STAGE/Artisan.app"
-xcrun stapler validate "$STAGE/Artisan.app"
-codesign --verify --deep --strict --verbose=2 "$STAGE/Artisan.app"
-spctl -a -vv --type execute "$STAGE/Artisan.app"
-
-ditto -c -k --sequesterRsrc "$STAGE" "$ARCHIVE"
-shasum -a 256 "$ARCHIVE"
+scripts/package-release.sh 0.1.0
 ```
 
 The `sha256` used by Homebrew must be calculated after the final archive is
@@ -103,17 +144,20 @@ Homebrew Cask is feasible for Artisan because the Cask Cookbook supports:
 - `app "Artisan.app"` to install the macOS app.
 - `binary "artisan"` to link the CLI into `$(brew --prefix)/bin`.
 
-For the private tap, the first cask should look roughly like:
+For the private tap, `scripts/package-release.sh` generates `dist/artisan.rb`.
+The first generated cask has this shape:
 
 ```ruby
 cask "artisan" do
   version "0.1.0"
-  sha256 "<release-archive-sha256>"
+  sha256 "<generated-release-archive-sha256>"
 
-  url "https://github.com/<owner>/artisan/releases/download/v#{version}/Artisan-v#{version}-macos-arm64.zip"
+  url "https://github.com/NoahCzelusta/artisan/releases/download/v#{version}/Artisan-v#{version}-macos-arm64.zip"
   name "Artisan"
   desc "Fast native macOS editor for quick file edits"
-  homepage "https://github.com/<owner>/artisan"
+  homepage "https://github.com/NoahCzelusta/artisan"
+
+  depends_on macos: ">= :sonoma"
 
   app "Artisan.app"
   binary "artisan"
@@ -121,7 +165,8 @@ end
 ```
 
 This matches the current CLI assumption that the executable lives next to
-`Artisan.app` inside the staged artifact. The cask must be tested with:
+`Artisan.app` inside the staged artifact. After copying `dist/artisan.rb` into a
+private tap, the cask must be tested with:
 
 ```bash
 brew install --cask <tap>/artisan
@@ -136,20 +181,37 @@ acceptable casks guidance says low-notability casks may be rejected from the
 main repositories, while private taps remain supported for software a team
 depends on.
 
+## Tag Release Flow
+
+To publish a release:
+
+1. Ensure the worktree is clean and the benchmark gate passes.
+2. Create and push a tag such as `v0.1.0`.
+3. `.github/workflows/release.yml` packages the archive, checksum, and generated
+   cask.
+4. For tag pushes, the workflow creates a GitHub Release and uploads the release
+   assets.
+5. Copy `dist/artisan.rb` or the uploaded `artisan.rb` asset into the private
+   Homebrew tap.
+
 ## Deferred Decisions
 
 License decision: deferred. The repo intentionally has no license file yet per
 the current project direction. Choose a license before any public release or
 official Homebrew Cask submission.
 
-CI decision: deferred. The release plan should eventually run packaging,
-signing dry-runs where possible, `brew audit`, and `scripts/run-benchmarks.sh`
-in CI, but CI setup is explicitly out of scope for the current MVP slice.
+Trusted signing credential setup: deferred until an Apple Developer Program
+account, Developer ID Application certificate, and notary credentials are
+available.
+
+Universal binary support: deferred until Intel support matters for the team.
 
 ## Source References
 
 - [Apple: Distributing software on macOS](https://developer.apple.com/macos/distribution/)
 - [Apple: Upload a macOS app to be notarized](https://help.apple.com/xcode/mac/current/en.lproj/dev88332a81e.html)
+- [GitHub Actions: Building and testing Swift](https://docs.github.com/actions/guides/building-and-testing-swift)
+- [GitHub Actions: Store and share data with workflow artifacts](https://docs.github.com/en/actions/tutorials/store-and-share-data)
 - [Homebrew: Cask Cookbook](https://docs.brew.sh/Cask-Cookbook)
 - [Homebrew: Acceptable Casks](https://docs.brew.sh/Acceptable-Casks)
 - [Homebrew: Adding Software to Homebrew](https://docs.brew.sh/Adding-Software-to-Homebrew)

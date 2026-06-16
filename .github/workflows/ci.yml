@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: SwiftPM checks
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          uname -m
+
+      - name: Build release products
+        run: swift build -c release
+
+      - name: Run CI gate
+        run: scripts/run-ci.sh
+
+      - name: Build uploadable dry-run package
+        env:
+          ARTISAN_DIST_DIR: ${{ github.workspace }}/dist
+          ARTISAN_RELEASE_VERSION: 0.0.0-ci
+        run: scripts/check-release-package.sh
+
+      - name: Upload dry-run package
+        uses: actions/upload-artifact@v6
+        with:
+          name: artisan-dry-run-package-${{ github.sha }}
+          path: |
+            dist/Artisan-v0.0.0-ci-macos-*.zip
+            dist/Artisan-v0.0.0-ci-macos-*.zip.sha256
+            dist/artisan.rb

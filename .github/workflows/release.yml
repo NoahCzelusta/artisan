@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the leading v, for example 0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package macOS release
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          uname -m
+
+      - name: Run production target checks
+        run: scripts/check-production-targets.sh
+
+      - name: Package release
+        env:
+          ARTISAN_DIST_DIR: ${{ github.workspace }}/dist
+          ARTISAN_RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/package-release.sh "${{ steps.version.outputs.version }}"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: artisan-release-${{ steps.version.outputs.version }}
+          path: |
+            dist/Artisan-v${{ steps.version.outputs.version }}-macos-*.zip
+            dist/Artisan-v${{ steps.version.outputs.version }}-macos-*.zip.sha256
+            dist/artisan.rb
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/Artisan-v${{ steps.version.outputs.version }}-macos-*.zip \
+            dist/Artisan-v${{ steps.version.outputs.version }}-macos-*.zip.sha256 \
+            dist/artisan.rb \
+            --verify-tag \
+            --generate-notes

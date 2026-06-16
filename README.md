@@ -31,6 +31,12 @@ Run the reproducible benchmark gate with:
 scripts/run-benchmarks.sh
 ```
 
+Run the deterministic CI gate locally with:
+
+```bash
+scripts/run-ci.sh
+```
+
 Build and open a file with the production CLI:
 
 ```bash
@@ -68,6 +74,17 @@ with:
 scripts/uninstall-local.sh
 ```
 
+Create a local release-package dry run:
+
+```bash
+ARTISAN_RELEASE_ALLOW_DIRTY=1 scripts/package-release.sh 0.1.0
+scripts/check-release-package.sh
+```
+
+This writes a versioned macOS zip, checksum, and generated Homebrew cask under
+`dist/` by default. Trusted teammate distribution still requires Developer ID
+signing and notarization; see [docs/distribution.md](docs/distribution.md).
+
 ## Documentation
 
 - [CONTEXT.md](CONTEXT.md) defines the product language.
@@ -79,4 +96,5 @@ scripts/uninstall-local.sh
 
 ## Status
 
-Pre-implementation. The repo currently contains product scope, agent setup, and architecture notes.
+MVP implementation is underway. The repo contains the native app, CLI, local
+install path, benchmark gates, CI, and release-package dry runs.

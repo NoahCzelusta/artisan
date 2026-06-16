@@ -23,8 +23,15 @@ required_patterns=(
   "private tap"
   "homebrew-cask"
   "sha256"
+  "scripts/package-release.sh"
+  ".github/workflows/ci.yml"
+  ".github/workflows/release.yml"
+  "ARTISAN_CODESIGN_IDENTITY"
+  "ARTISAN_NOTARY_KEYCHAIN_PROFILE"
+  "dist/artisan.rb"
+  "CI is configured"
   "License decision: deferred"
-  "CI decision: deferred"
+  "Trusted signing credential setup: deferred"
 )
 
 for pattern in "${required_patterns[@]}"; do
