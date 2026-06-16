@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode / Swift
+.build/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.playground/xcuserdata/
+
+# Swift Package Manager
+Package.resolved
+
+# Logs and local environment
+*.log
+.env
+.env.*
+
+# Editor / tooling
+.vscode/
+.idea/
+
+# Build artifacts
+build/
+dist/
