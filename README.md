@@ -73,6 +73,7 @@ scripts/uninstall-local.sh
 - [CONTEXT.md](CONTEXT.md) defines the product language.
 - [docs/adr/](docs/adr/) records architectural decisions.
 - [docs/benchmarks.md](docs/benchmarks.md) defines benchmark targets and measurement paths.
+- [docs/distribution.md](docs/distribution.md) defines the release distribution path.
 - [docs/syntax-highlighting.md](docs/syntax-highlighting.md) defines the initial highlighting coverage plan.
 - [AGENTS.md](AGENTS.md) configures agent workflows for this repo.
 
