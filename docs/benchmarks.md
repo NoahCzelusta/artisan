@@ -15,6 +15,7 @@ The runner:
 - builds the release app
 - generates deterministic 10 MiB fixtures under `.scratch/benchmark-fixtures/`
 - runs the app benchmark mode against the TypeScript fixture
+- runs the all-language large highlighting benchmark across every supported language id
 - measures cold CLI launch/open through `artisan`
 - checks results against `benchmarks/targets.env`
 
@@ -36,6 +37,7 @@ The machine-readable targets live in `benchmarks/targets.env`. The current produ
 | Scroll average step | `<8 ms` |
 | Navigation average move | `<8 ms` |
 | Highlight average line | `<0.05 ms` |
+| All-language highlight average line | `<0.05 ms` for each language |
 | Insert average character | `<4 ms` |
 | Delete average character | `<4 ms` |
 | Newline average insert | `<8 ms` |
@@ -59,6 +61,7 @@ Benchmarks must cover user paths, not only convenient internal APIs:
 - paste
 - edit near the bottom of a 10 MiB file
 - viewport-bounded syntax highlighting
+- large-fixture syntax highlighting for every supported language id
 
 The scrollbar benchmark must use the `NSScrollView` clip-view path. A benchmark that calls only a document-view helper is not sufficient.
 
@@ -69,6 +72,7 @@ Benchmark fixtures should be deterministic and generated locally:
 - `large.ts`: TypeScript-like code with comments, strings, types, and exports
 - `large.md`: Markdown text with code fences and prose
 - `large.txt`: plain text
+- all-language highlighting fixtures: one generated large file per supported language id
 
 Each fixture is at least 10 MiB. Do not commit generated fixture files.
 

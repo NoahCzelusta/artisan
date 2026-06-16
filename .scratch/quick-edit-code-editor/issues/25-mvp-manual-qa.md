@@ -79,6 +79,10 @@ The MVP is verified through real user interactions, not only implementation assu
 - 2026-06-16: Fixed `scripts/run-benchmarks.sh` cleanup to kill repo app-bundle `ArtisanApp --server` processes. This removed stale servers that caused a cold CLI outlier.
 - 2026-06-16: Latest benchmark gate passed after cleanup fix with cold CLI open runs `224 199 204 214 202` ms; immediate bottom render was `9.73` ms and scroll averaged `5.5037` ms.
 - 2026-06-16: Latest full scripted checks passed: release distribution plan, local install packaging, editor core, preferences, web/scripting highlighting, C-family highlighting, doc/data highlighting, TS/JS highlighting, language registry, native menus, find, undo/redo, selection editing/model, keyboard navigation, disk-change save protection, save operations, edit operations, CLI wait/open, plain text rendering, production targets, and PRD check.
+- 2026-06-16: Added all-language large highlighting benchmark coverage. `scripts/check-all-language-highlighting-benchmarks.sh` generates one large fixture per supported language id and measures 1,000 steady-state highlighted lines through `TextBuffer.highlightedSegments`.
+- 2026-06-16: `scripts/run-benchmarks.sh` now includes the all-language highlighting gate instead of benchmarking only the TypeScript fixture for syntax performance.
+- 2026-06-16: Latest full scripted checks passed with the all-language gate included. `scripts/run-benchmarks.sh` passed with cold CLI open runs `190 206 202 210 222` ms; immediate bottom render was `10.43` ms, scroll averaged `5.5827` ms, and all 26 language ids passed with worst highlight average `0.0198` ms/line for TypeScript.
+- 2026-06-16: Added a production-target guard so `scripts/check-production-targets.sh` fails if `scripts/run-benchmarks.sh` stops invoking the all-language highlighting gate. Final focused re-run passed with cold CLI open runs `207 205 190 198 203` ms and worst all-language highlight average `0.0200` ms/line for TypeScript.
 
 ### Human QA checklist
 

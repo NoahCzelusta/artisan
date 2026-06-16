@@ -131,4 +131,6 @@ for ms in "${cold_results[@]}"; do
     || fail "cold_cli_open_ms=$ms must be < $ARTISAN_BENCH_COLD_CLI_OPEN_MS_MAX"
 done
 
+"$ROOT_DIR/scripts/check-all-language-highlighting-benchmarks.sh"
+
 echo "benchmark result: PASS"

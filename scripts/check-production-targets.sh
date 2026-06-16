@@ -19,8 +19,10 @@ rg -q 'executableTarget\(name: "artisan"' "$PACKAGE" || fail "Package.swift must
 
 rg -q 'APP="\$ROOT_DIR/\.build/release/ArtisanApp"' "$BENCH" || fail "benchmark runner must use production ArtisanApp"
 rg -q 'CLI="\$ROOT_DIR/\.build/release/artisan"' "$BENCH" || fail "benchmark runner must use production artisan CLI"
+rg -q 'check-all-language-highlighting-benchmarks\.sh' "$BENCH" || fail "benchmark runner must include all-language highlighting gate"
 
 test -x "$BUNDLE_SCRIPT" || fail "scripts/build-artisan-app.sh must exist and be executable"
+test -x "$ROOT_DIR/scripts/check-all-language-highlighting-benchmarks.sh" || fail "all-language highlighting gate must exist and be executable"
 rg -q 'swift build -c release' "$README" || fail "README must document release build"
 rg -q '\.build/release/artisan' "$README" || fail "README must document production artisan CLI path"
 rg -q '\.build/release/Artisan\.app' "$README" || fail "README must document local app bundle path"

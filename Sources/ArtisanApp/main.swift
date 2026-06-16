@@ -4074,6 +4074,117 @@ func runHighlightModeBenchmarkIfRequested() {
     }
 }
 
+func runLargeLanguageHighlightingBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-large-language-highlighting"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let fixtureDirectory = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL
+    let requestedSampleLines = Int(ProcessInfo.processInfo.environment["ARTISAN_BENCH_LANGUAGE_HIGHLIGHT_SAMPLE_LINES"] ?? "") ?? 1_000
+    let expectations: [(path: String, languageID: String, dedicated: Bool)] = [
+        ("large.ts", "typescript", true),
+        ("large.js", "javascript", true),
+        ("large.py", "python", true),
+        ("Large.java", "java", true),
+        ("large.c", "c", true),
+        ("large.cpp", "cpp", true),
+        ("Large.cs", "csharp", true),
+        ("large.go", "go", true),
+        ("large.rs", "rust", true),
+        ("large.php", "php", true),
+        ("large.rb", "ruby", true),
+        ("large.swift", "swift", true),
+        ("Large.kt", "kotlin", true),
+        ("large.sql", "sql", true),
+        ("large.html", "html", true),
+        ("large.css", "css", true),
+        ("large.sh", "shell", true),
+        ("large.json", "json", true),
+        ("large.yaml", "yaml", true),
+        ("large.r", "r", true),
+        ("README.md", "markdown", true),
+        ("large.txt", "text", false),
+        ("Makefile", "makefile", false),
+        ("Dockerfile", "dockerfile", false),
+        ("large.xml", "xml", false),
+        ("large.toml", "toml", false)
+    ]
+
+    do {
+        var failures: [String] = []
+        var totalSampleLines = 0
+        var worstLanguage = ""
+        var worstAverage = 0.0
+
+        for expectation in expectations {
+            let buffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent(expectation.path).path)
+            if buffer.languageID != expectation.languageID {
+                failures.append("\(expectation.path): expected \(expectation.languageID), got \(buffer.languageID)")
+            }
+
+            _ = buffer.highlightedSegments(at: 0)
+            let firstMeasuredLine = buffer.indexedLineCount > 1 ? 1 : 0
+            let availableMeasuredLines = max(1, buffer.indexedLineCount - firstMeasuredLine)
+            let sampleLines = min(max(1, requestedSampleLines), availableMeasuredLines)
+            var totalSegments = 0
+            var multiSegmentLines = 0
+            var nonPlainLines = 0
+
+            let start = DispatchTime.now().uptimeNanoseconds
+            for offset in 0..<sampleLines {
+                let lineIndex = firstMeasuredLine + offset
+                let segments = buffer.highlightedSegments(at: lineIndex)
+                totalSegments += segments.count
+                if segments.count > 1 {
+                    multiSegmentLines += 1
+                }
+                if segments.contains(where: { $0.kind != .plain }) {
+                    nonPlainLines += 1
+                }
+            }
+            let elapsedMS = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            let averageLineMS = elapsedMS / Double(sampleLines)
+
+            if expectation.dedicated && nonPlainLines == 0 {
+                failures.append("\(expectation.path): dedicated highlighter produced only plain segments")
+            }
+            if expectation.languageID == "text", multiSegmentLines != 0 {
+                failures.append("\(expectation.path): plain text produced \(multiSegmentLines) multi-segment lines")
+            }
+            if averageLineMS > worstAverage {
+                worstAverage = averageLineMS
+                worstLanguage = expectation.languageID
+            }
+
+            totalSampleLines += sampleLines
+            print("benchmark.large_language.\(expectation.languageID).sample_lines=\(sampleLines)")
+            print("benchmark.large_language.\(expectation.languageID).total_segments=\(totalSegments)")
+            print("benchmark.large_language.\(expectation.languageID).multi_segment_lines=\(multiSegmentLines)")
+            print(String(format: "benchmark.large_language.%@.highlight_ms=%.2f", expectation.languageID, elapsedMS))
+            print(String(format: "benchmark.large_language.%@.avg_line_ms=%.4f", expectation.languageID, averageLineMS))
+        }
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.large_language.count=\(expectations.count)")
+        print("benchmark.large_language.sample_lines_total=\(totalSampleLines)")
+        print("benchmark.large_language.worst_language=\(worstLanguage)")
+        print(String(format: "benchmark.large_language.worst_avg_line_ms=%.4f", worstAverage))
+        print("benchmark.large_language_highlighting=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 func runEditOperationsBenchmarkIfRequested() {
     let args = CommandLine.arguments
     guard let modeIndex = args.firstIndex(of: "--benchmark-edit-operations"),
@@ -4834,6 +4945,7 @@ func runEditorCoreBenchmarkIfRequested() {
 }
 
 runHighlightModeBenchmarkIfRequested()
+runLargeLanguageHighlightingBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
 runDiskChangeSaveBenchmarkIfRequested()
