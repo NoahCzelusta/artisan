@@ -23,6 +23,7 @@ fi
 BUILD_NUMBER="${ARTISAN_BUILD_NUMBER:-$(cd "$ROOT_DIR" && git rev-list --count HEAD 2>/dev/null || printf '1')}"
 CODESIGN_IDENTITY="${ARTISAN_CODESIGN_IDENTITY:-}"
 NOTARY_PROFILE="${ARTISAN_NOTARY_KEYCHAIN_PROFILE:-}"
+NOTARY_KEYCHAIN="${ARTISAN_NOTARY_KEYCHAIN:-}"
 
 fail() {
   echo "package-release: $*" >&2
@@ -82,7 +83,11 @@ create_archive() {
 create_archive
 
 if [[ -n "$NOTARY_PROFILE" ]]; then
-  xcrun notarytool submit "$ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
+  notary_args=(submit "$ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait)
+  if [[ -n "$NOTARY_KEYCHAIN" ]]; then
+    notary_args+=(--keychain "$NOTARY_KEYCHAIN")
+  fi
+  xcrun notarytool "${notary_args[@]}"
   xcrun stapler staple "$STAGE/$APP_NAME.app"
   xcrun stapler validate "$STAGE/$APP_NAME.app"
   create_archive

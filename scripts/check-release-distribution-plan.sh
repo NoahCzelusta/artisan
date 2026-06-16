@@ -29,10 +29,12 @@ required_patterns=(
   ".github/workflows/release.yml"
   "ARTISAN_CODESIGN_IDENTITY"
   "ARTISAN_NOTARY_KEYCHAIN_PROFILE"
+  "ARTISAN_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64"
+  "ARTISAN_NOTARY_API_KEY_BASE64"
   "dist/artisan.rb"
   "CI is configured"
   "License decision: deferred"
-  "Trusted signing credential setup: deferred"
+  "GitHub signing secret provisioning"
 )
 
 for pattern in "${required_patterns[@]}"; do

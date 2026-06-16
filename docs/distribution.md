@@ -63,6 +63,10 @@ CI is configured through GitHub Actions:
   dispatch. It builds release products, runs `scripts/run-ci.sh`, creates a
   release-package dry run, and uploads the zip/checksum/generated cask as a
   workflow artifact.
+- `.github/workflows/release.yml` requires signing/notarization secrets,
+  imports a Developer ID Application certificate into a temporary keychain,
+  creates a temporary `artisan-ci` notary profile, packages the release, and
+  validates Gatekeeper acceptance before publishing assets.
 - `scripts/run-benchmarks.sh` remains the local product performance gate with
   the aggressive benchmark targets in `benchmarks/targets.env`.
 
@@ -109,6 +113,8 @@ Useful environment variables:
   signing. Without it, the script uses ad hoc signing.
 - `ARTISAN_NOTARY_KEYCHAIN_PROFILE`: `notarytool` keychain profile. Without it,
   the script skips notarization.
+- `ARTISAN_NOTARY_KEYCHAIN`: optional keychain path to pass to `notarytool`.
+  The release workflow uses this for its temporary signing keychain.
 
 ## Signing And Notarization
 
@@ -137,6 +143,47 @@ scripts/package-release.sh 0.0.1
 
 The `sha256` used by Homebrew must be calculated after the final archive is
 created, not before stapling changes the staged app bundle.
+
+### GitHub Release Secrets
+
+Tag releases require these repository secrets:
+
+- `ARTISAN_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64`: base64 of the exported
+  Developer ID Application `.p12`.
+- `ARTISAN_DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD`: password for that
+  `.p12`.
+- `ARTISAN_NOTARY_API_KEY_BASE64`: base64 of the App Store Connect API
+  `AuthKey_*.p8` file.
+- `ARTISAN_NOTARY_API_KEY_ID`: App Store Connect API key ID.
+- `ARTISAN_NOTARY_API_ISSUER_ID`: App Store Connect API issuer UUID.
+
+The release workflow stores the notary credentials as `artisan-ci` in a
+temporary keychain for the duration of the job. Local proof builds can reuse an
+existing local profile such as `flow-notary`; GitHub Actions cannot access local
+Keychain profiles.
+
+Export the Developer ID Application identity from Keychain Access, or with:
+
+```bash
+security export \
+  -k "$HOME/Library/Keychains/login.keychain-db" \
+  -t identities \
+  -f pkcs12 \
+  -o /tmp/artisan-developer-id-application.p12
+```
+
+Then set the secrets with:
+
+```bash
+base64 < /tmp/artisan-developer-id-application.p12 |
+  gh secret set ARTISAN_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 --repo NoahCzelusta/artisan
+gh secret set ARTISAN_DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD --repo NoahCzelusta/artisan
+
+base64 < "$HOME/Downloads/App Store Connect Auth Key.p8" |
+  gh secret set ARTISAN_NOTARY_API_KEY_BASE64 --repo NoahCzelusta/artisan
+gh secret set ARTISAN_NOTARY_API_KEY_ID --repo NoahCzelusta/artisan
+gh secret set ARTISAN_NOTARY_API_ISSUER_ID --repo NoahCzelusta/artisan
+```
 
 ## Homebrew Cask Plan
 
@@ -217,9 +264,9 @@ License decision: deferred. The repo intentionally has no license file yet per
 the current project direction. Choose a license before any broader public
 announcement or official Homebrew Cask submission.
 
-Trusted signing credential setup: deferred until an Apple Developer Program
-account, Developer ID Application certificate, and notary credentials are
-available.
+GitHub signing secret provisioning: pending until the Developer ID `.p12`
+export, `.p12` password, and App Store Connect API key metadata are added as
+repository secrets.
 
 Universal binary support: deferred until Intel support matters for the team.
 
