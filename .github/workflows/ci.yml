@@ -28,6 +28,9 @@ jobs:
           swift --version
           uname -m
 
+      - name: Install check dependencies
+        run: brew list ripgrep >/dev/null 2>&1 || brew install ripgrep
+
       - name: Build release products
         run: swift build -c release
 
