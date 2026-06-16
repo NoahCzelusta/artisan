@@ -60,27 +60,42 @@ func launchServerIfNeeded() {
         exit(70)
     }
 
-    let executableDirectory = executableURL.deletingLastPathComponent()
-    let bundleURL = executableDirectory.appendingPathComponent("Artisan.app")
-    let bundleExecutableURL = bundleURL
-        .appendingPathComponent("Contents")
-        .appendingPathComponent("MacOS")
-        .appendingPathComponent("ArtisanApp")
-    if FileManager.default.isExecutableFile(atPath: bundleExecutableURL.path) {
-        launchDetached(
-            executableURL: bundleExecutableURL,
-            arguments: ["--server"]
-        )
-        return
+    let executableDirectories = [
+        executableURL.deletingLastPathComponent(),
+        executableURL.resolvingSymlinksInPath().deletingLastPathComponent()
+    ]
+
+    for executableDirectory in uniqueURLs(executableDirectories) {
+        let bundleExecutableURL = executableDirectory
+            .appendingPathComponent("Artisan.app")
+            .appendingPathComponent("Contents")
+            .appendingPathComponent("MacOS")
+            .appendingPathComponent("ArtisanApp")
+        if FileManager.default.isExecutableFile(atPath: bundleExecutableURL.path) {
+            launchDetached(
+                executableURL: bundleExecutableURL,
+                arguments: ["--server"]
+            )
+            return
+        }
+
+        let appURL = executableDirectory.appendingPathComponent("ArtisanApp")
+        if FileManager.default.isExecutableFile(atPath: appURL.path) {
+            launchDetached(executableURL: appURL, arguments: ["--server"])
+            return
+        }
     }
 
-    let appURL = executableDirectory.appendingPathComponent("ArtisanApp")
-    guard FileManager.default.isExecutableFile(atPath: appURL.path) else {
-        fputs("artisan: expected app executable at \(appURL.path)\n", stderr)
-        exit(69)
-    }
+    fputs("artisan: could not find Artisan.app near \(executableURL.path)\n", stderr)
+    exit(69)
+}
 
-    launchDetached(executableURL: appURL, arguments: ["--server"])
+func uniqueURLs(_ urls: [URL]) -> [URL] {
+    var seen: Set<String> = []
+    return urls.filter { url in
+        let path = url.standardizedFileURL.path
+        return seen.insert(path).inserted
+    }
 }
 
 func launchDetached(executableURL: URL, arguments: [String]) {

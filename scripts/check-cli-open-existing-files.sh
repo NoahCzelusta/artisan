@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI="$ROOT_DIR/.build/release/artisan"
+APP_BUNDLE="$ROOT_DIR/.build/release/Artisan.app"
+TEMP_DIRS=()
 
 fail() {
   echo "cli open check failed: $*" >&2
@@ -12,10 +14,15 @@ fail() {
 cleanup() {
   pkill -x ArtisanApp >/dev/null 2>&1 || true
   rm -f "/tmp/artisan-$(id -u).sock"
+  if ((${#TEMP_DIRS[@]})); then
+    rm -rf "${TEMP_DIRS[@]}"
+    TEMP_DIRS=()
+  fi
 }
 
 cd "$ROOT_DIR"
 "$ROOT_DIR/scripts/build-artisan-app.sh" >/dev/null
+swift build -c release >/dev/null
 
 cleanup
 trap cleanup EXIT
@@ -27,6 +34,18 @@ pgrep -f 'Artisan\.app/Contents/MacOS/ArtisanApp' >/dev/null || fail "CLI should
 
 multi_output="$("$CLI" "$ROOT_DIR/README.md" "$ROOT_DIR/CONTEXT.md")"
 [[ "$multi_output" == "opened 2 file(s)" ]] || fail "multi open returned: $multi_output"
+
+cleanup
+cask_root="$(mktemp -d)"
+bin_root="$(mktemp -d)"
+TEMP_DIRS+=("$cask_root" "$bin_root")
+mkdir -p "$cask_root/artisan/0.0.0"
+install -m 0755 "$CLI" "$cask_root/artisan/0.0.0/artisan"
+ln -s "$APP_BUNDLE" "$cask_root/artisan/0.0.0/Artisan.app"
+ln -s "$cask_root/artisan/0.0.0/artisan" "$bin_root/artisan"
+homebrew_output="$("$bin_root/artisan" "$ROOT_DIR/README.md")"
+[[ "$homebrew_output" == "opened 1 file(s)" ]] || fail "homebrew-style symlink open returned: $homebrew_output"
+cleanup
 
 if "$CLI" "$ROOT_DIR/definitely-missing.ts" >/tmp/artisan-missing.out 2>/tmp/artisan-missing.err; then
   fail "missing file unexpectedly succeeded"
