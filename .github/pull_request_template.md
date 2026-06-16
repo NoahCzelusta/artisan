@@ -1,4 +1,4 @@
-## Summary
+## Maintainer Summary
 
 - 
 
@@ -13,3 +13,5 @@
 ## Notes
 
 - 
+
+<!-- Artisan does not currently support unsolicited external contributions. -->

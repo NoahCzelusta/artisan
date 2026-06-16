@@ -15,7 +15,7 @@ The goal is simple: open existing files from the command line, make focused edit
 - Conservative file saves
 - No language servers, indexing, extensions, terminal, Git integration, or AI/chat integration
 
-See [.scratch/quick-edit-code-editor/PRD.md](.scratch/quick-edit-code-editor/PRD.md) for the current product requirements.
+See [SPEC.md](SPEC.md) for the product spec.
 
 ## Performance Targets
 
@@ -106,7 +106,7 @@ artisan --wait README.md
 - [docs/distribution.md](docs/distribution.md) defines the release distribution path.
 - [docs/syntax-highlighting.md](docs/syntax-highlighting.md) defines the initial highlighting coverage plan.
 - [AGENTS.md](AGENTS.md) configures agent workflows for this repo.
-- [CONTRIBUTING.md](CONTRIBUTING.md) explains local setup, verification, and PR expectations.
+- [CONTRIBUTING.md](CONTRIBUTING.md) explains the fork/reference policy.
 - [SECURITY.md](SECURITY.md) explains private vulnerability reporting.
 
 ## Status

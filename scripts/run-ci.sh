@@ -8,7 +8,7 @@ checks=(
   scripts/check-open-source-readiness.sh
   scripts/check-production-targets.sh
   scripts/check-release-distribution-plan.sh
-  scripts/check-mvp-prd.sh
+  scripts/check-product-spec.sh
   scripts/check-plain-text-rendering.sh
   scripts/check-cli-open-existing-files.sh
   scripts/check-cli-wait.sh

@@ -29,6 +29,8 @@ build/
 dist/
 
 # Generated benchmark artifacts
+.scratch/*/PRD.md
+.scratch/*/issues/
 .scratch/benchmark-fixtures/
 .scratch/benchmark-results/
 .scratch/c-family-highlighting-fixtures/

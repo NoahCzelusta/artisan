@@ -1,5 +1,5 @@
-name: Bug report
-description: Report a reproducible Artisan bug
+name: Maintainer bug
+description: Track a reproducible Artisan bug
 title: "[Bug]: "
 labels: ["needs-triage"]
 body:
@@ -7,7 +7,7 @@ body:
     id: summary
     attributes:
       label: Summary
-      description: What happened?
+      description: What happened? Public support requests may be closed without action.
     validations:
       required: true
   - type: textarea

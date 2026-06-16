@@ -1,6 +1,6 @@
 # Code Of Conduct
 
-Artisan contributors are expected to keep project spaces focused, respectful, and useful.
+Artisan project participants are expected to keep project spaces focused, respectful, and useful.
 
 ## Expected Behavior
 
@@ -18,4 +18,4 @@ Artisan contributors are expected to keep project spaces focused, respectful, an
 
 ## Enforcement
 
-Maintainers may edit, hide, or remove comments; close issues or PRs; or block contributors when behavior harms the project.
+Maintainers may edit, hide, or remove comments; close issues or PRs; or block accounts when behavior harms the project.

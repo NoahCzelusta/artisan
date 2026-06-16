@@ -1,19 +1,30 @@
-# Issue tracker: Local Markdown
+# Issue Tracker: GitHub
 
-Issues and PRDs for this repo live as markdown files in `.scratch/`.
+Issues and product work for this repo live in GitHub Issues for `NoahCzelusta/artisan`. Use the `gh` CLI for issue operations.
 
 ## Conventions
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The PRD is `.scratch/<feature-slug>/PRD.md`
-- Implementation issues are `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`
-- Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
-- Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- Create issues with `gh issue create --repo NoahCzelusta/artisan --title "..." --body "..."`.
+- Read issues with `gh issue view <number> --repo NoahCzelusta/artisan --comments`.
+- List issues with `gh issue list --repo NoahCzelusta/artisan --state open --json number,title,body,labels`.
+- Comment with `gh issue comment <number> --repo NoahCzelusta/artisan --body "..."`.
+- Apply labels with `gh issue edit <number> --repo NoahCzelusta/artisan --add-label "..."`.
+- Close issues with `gh issue close <number> --repo NoahCzelusta/artisan --comment "..."`.
 
-## When a skill says "publish to the issue tracker"
+## When A Skill Says "Publish To The Issue Tracker"
 
-Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
+Create a GitHub issue in `NoahCzelusta/artisan`.
 
-## When a skill says "fetch the relevant ticket"
+Use the triage label mapping in `docs/agents/triage-labels.md`.
 
-Read the file at the referenced path. The user will normally pass the path or the issue number directly.
+## When A Skill Says "Fetch The Relevant Ticket"
+
+Run:
+
+```bash
+gh issue view <number> --repo NoahCzelusta/artisan --comments
+```
+
+## Migration Note
+
+Historical local markdown issues were migrated from `.scratch/quick-edit-code-editor/issues/` and `.scratch/repo-scaffold/issues/` to GitHub Issues #1-#27 on 2026-06-16. Do not create new issue-tracker files under `.scratch/`.
