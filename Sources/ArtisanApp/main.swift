@@ -611,7 +611,30 @@ final class FastFileView: NSView {
                 pasteFromClipboard()
                 return
             }
-            super.keyDown(with: event)
+            switch event.keyCode {
+            case 123:
+                moveToLineStart()
+            case 124:
+                moveToLineEnd()
+            case 125:
+                moveToFileEnd()
+            case 126:
+                moveToFileStart()
+            default:
+                super.keyDown(with: event)
+            }
+            return
+        }
+
+        if event.modifierFlags.contains(.option) {
+            switch event.keyCode {
+            case 123:
+                moveWordLeft()
+            case 124:
+                moveWordRight()
+            default:
+                super.keyDown(with: event)
+            }
             return
         }
 
@@ -623,21 +646,21 @@ final class FastFileView: NSView {
         case 36, 76:
             applyEdit { buffer.insertNewline(atLine: caretLine, column: caretColumn) }
         case 123:
-            moveCaret(line: caretLine, column: caretColumn - 1)
+            moveCharacterLeft()
         case 124:
-            moveCaret(line: caretLine, column: caretColumn + 1)
+            moveCharacterRight()
         case 125:
-            moveCaret(line: caretLine + 1, column: caretColumn)
+            moveLineDown()
         case 126:
-            moveCaret(line: caretLine - 1, column: caretColumn)
+            moveLineUp()
         case 121:
-            moveCaret(line: caretLine + visibleLineCount(), column: caretColumn)
+            movePageDown()
         case 116:
-            moveCaret(line: caretLine - visibleLineCount(), column: caretColumn)
+            movePageUp()
         case 115:
-            moveCaret(line: 0, column: 0)
+            moveToLineStart()
         case 119:
-            moveCaret(line: buffer.lineCount - 1, column: 0)
+            moveToLineEnd()
         default:
             if let characters = event.characters, characters.unicodeScalars.allSatisfy({ $0.value >= 32 && $0.value != 127 }) {
                 applyEdit { buffer.insert(characters, atLine: caretLine, column: caretColumn) }
@@ -691,6 +714,114 @@ final class FastFileView: NSView {
     private func visibleLineCount() -> Int {
         let height = enclosingScrollView?.contentView.bounds.height ?? 700
         return max(1, Int(height / lineHeight))
+    }
+
+    private func moveCharacterLeft() {
+        if caretColumn > 0 {
+            moveCaret(line: caretLine, column: caretColumn - 1)
+        } else if caretLine > 0 {
+            let previousLine = caretLine - 1
+            moveCaret(line: previousLine, column: buffer.lineText(at: previousLine).count)
+        }
+    }
+
+    private func moveCharacterRight() {
+        let lineLength = buffer.lineText(at: caretLine).count
+        if caretColumn < lineLength {
+            moveCaret(line: caretLine, column: caretColumn + 1)
+        } else if caretLine + 1 < buffer.lineCount {
+            moveCaret(line: caretLine + 1, column: 0)
+        }
+    }
+
+    private func moveLineUp() {
+        moveCaret(line: caretLine - 1, column: caretColumn)
+    }
+
+    private func moveLineDown() {
+        moveCaret(line: caretLine + 1, column: caretColumn)
+    }
+
+    private func movePageUp() {
+        moveCaret(line: caretLine - visibleLineCount(), column: caretColumn)
+    }
+
+    private func movePageDown() {
+        moveCaret(line: caretLine + visibleLineCount(), column: caretColumn)
+    }
+
+    private func moveToLineStart() {
+        moveCaret(line: caretLine, column: 0)
+    }
+
+    private func moveToLineEnd() {
+        moveCaret(line: caretLine, column: buffer.lineText(at: caretLine).count)
+    }
+
+    private func moveToFileStart() {
+        moveCaret(line: 0, column: 0)
+    }
+
+    private func moveToFileEnd() {
+        let lastLine = buffer.lineCount - 1
+        moveCaret(line: lastLine, column: buffer.lineText(at: lastLine).count)
+    }
+
+    private func moveWordLeft() {
+        if caretColumn == 0 {
+            guard caretLine > 0 else { return }
+            let previousLine = caretLine - 1
+            moveCaret(line: previousLine, column: buffer.lineText(at: previousLine).count)
+            return
+        }
+
+        let line = buffer.lineText(at: caretLine)
+        let target = wordBoundaryLeft(in: line, from: caretColumn)
+        moveCaret(line: caretLine, column: target)
+    }
+
+    private func moveWordRight() {
+        let line = buffer.lineText(at: caretLine)
+        if caretColumn >= line.count {
+            guard caretLine + 1 < buffer.lineCount else { return }
+            moveCaret(line: caretLine + 1, column: 0)
+            return
+        }
+
+        let target = wordBoundaryRight(in: line, from: caretColumn)
+        moveCaret(line: caretLine, column: target)
+    }
+
+    private func wordBoundaryLeft(in line: String, from column: Int) -> Int {
+        let characters = Array(line)
+        var index = min(max(0, column), characters.count)
+
+        while index > 0, !isWordCharacter(characters[index - 1]) {
+            index -= 1
+        }
+        while index > 0, isWordCharacter(characters[index - 1]) {
+            index -= 1
+        }
+
+        return index
+    }
+
+    private func wordBoundaryRight(in line: String, from column: Int) -> Int {
+        let characters = Array(line)
+        var index = min(max(0, column), characters.count)
+
+        while index < characters.count, !isWordCharacter(characters[index]) {
+            index += 1
+        }
+        while index < characters.count, isWordCharacter(characters[index]) {
+            index += 1
+        }
+
+        return index
+    }
+
+    private func isWordCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_"
     }
 
     private func applyEdit(_ operation: () -> (line: Int, column: Int)) {
@@ -838,6 +969,72 @@ final class FastFileView: NSView {
         let bottomEditMS = Double(DispatchTime.now().uptimeNanoseconds - bottomEditStart) / 1_000_000
 
         return (insertMS, deleteMS, newlineMS, pasteMS, bottomEditMS)
+    }
+
+    func benchmarkKeyboardNavigation() -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        var failures: [String] = []
+
+        func expect(_ label: String, line expectedLine: Int, column expectedColumn: Int) {
+            if caretLine != expectedLine || caretColumn != expectedColumn {
+                failures.append("\(label): expected \(expectedLine):\(expectedColumn), got \(caretLine):\(caretColumn)")
+            }
+        }
+
+        moveToFileStart()
+        expect("file start", line: 0, column: 0)
+
+        moveCharacterRight()
+        expect("character right", line: 0, column: 1)
+
+        moveCharacterLeft()
+        expect("character left", line: 0, column: 0)
+
+        moveToLineEnd()
+        expect("line end", line: 0, column: 16)
+
+        moveToLineStart()
+        expect("line start", line: 0, column: 0)
+
+        moveWordRight()
+        expect("word right alpha", line: 0, column: 5)
+
+        moveWordRight()
+        expect("word right beta", line: 0, column: 10)
+
+        moveWordRight()
+        expect("word right gamma", line: 0, column: 16)
+
+        moveWordLeft()
+        expect("word left gamma", line: 0, column: 11)
+
+        moveWordLeft()
+        expect("word left beta", line: 0, column: 6)
+
+        moveLineDown()
+        expect("line down preserves column", line: 1, column: 6)
+
+        moveToLineEnd()
+        expect("second line end", line: 1, column: 19)
+
+        moveCharacterRight()
+        expect("character right across newline", line: 2, column: 0)
+
+        moveToFileEnd()
+        expect("file end", line: 2, column: 9)
+
+        moveCharacterRight()
+        expect("character right at eof", line: 2, column: 9)
+
+        moveToFileStart()
+        movePageDown()
+        expect("page down clamps to file end line", line: 2, column: 0)
+
+        movePageUp()
+        expect("page up clamps to file start line", line: 0, column: 0)
+
+        return failures
     }
 
     func benchmarkHighlighting(iterations: Int) -> Double {
@@ -1631,10 +1828,38 @@ func runDiskChangeSaveBenchmarkIfRequested() {
     }
 }
 
+func runKeyboardNavigationBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-keyboard-navigation"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        let buffer = try TextBuffer(path: path)
+        let fileView = FastFileView(buffer: buffer)
+        let failures = fileView.benchmarkKeyboardNavigation()
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.keyboard_navigation=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
 runDiskChangeSaveBenchmarkIfRequested()
+runKeyboardNavigationBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()
