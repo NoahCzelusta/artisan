@@ -34,4 +34,5 @@ dist/
 .scratch/disk-change-fixtures/
 .scratch/edit-fixtures/
 .scratch/navigation-fixtures/
+.scratch/selection-fixtures/
 .scratch/save-fixtures/
