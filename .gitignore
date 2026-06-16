@@ -27,3 +27,7 @@ Package.resolved
 # Build artifacts
 build/
 dist/
+
+# Generated benchmark artifacts
+.scratch/benchmark-fixtures/
+.scratch/benchmark-results/

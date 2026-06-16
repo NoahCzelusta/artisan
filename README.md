@@ -25,10 +25,18 @@ See [.scratch/quick-edit-code-editor/PRD.md](.scratch/quick-edit-code-editor/PRD
 - 2 MB source/text files must feel smooth
 - 10 MB source/text files should open and scroll without beachballing
 
+Run the reproducible benchmark gate with:
+
+```bash
+scripts/run-benchmarks.sh
+```
+
 ## Documentation
 
 - [CONTEXT.md](CONTEXT.md) defines the product language.
 - [docs/adr/](docs/adr/) records architectural decisions.
+- [docs/benchmarks.md](docs/benchmarks.md) defines benchmark targets and measurement paths.
+- [docs/syntax-highlighting.md](docs/syntax-highlighting.md) defines the initial highlighting coverage plan.
 - [AGENTS.md](AGENTS.md) configures agent workflows for this repo.
 
 ## Status

@@ -1,0 +1,54 @@
+# Syntax Highlighting
+
+Syntax highlighting must stay subordinate to launch speed, editing latency, and scrolling. Artisan highlights the visible viewport first and must not parse or highlight an entire large file on open.
+
+## Rules
+
+- Highlighting is viewport-bounded.
+- Highlighting must not block file open.
+- Highlighting must not start a language server.
+- Highlighting must not index a project or workspace.
+- Highlighting may cache visible and nearby lines.
+- Highlighting must degrade to plain text for unknown or expensive cases.
+- Multi-line language state is allowed only when bounded and incrementally recoverable.
+
+## Initial Coverage Set
+
+This is a pragmatic first coverage set, not an exact popularity ranking. It is informed by public popularity signals such as GitHub Octoverse, TIOBE, and PYPL, but optimized for files developers commonly open during agent-assisted coding.
+
+| Language / Format | Extensions | First highlighter strategy |
+| --- | --- | --- |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | C-like lexer plus JSX/TSX mode |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | C-like lexer plus JSX mode |
+| Python | `.py`, `.pyi` | indentation-aware line lexer |
+| Java | `.java` | C-like lexer |
+| C | `.c`, `.h` | C-like lexer |
+| C++ | `.cc`, `.cpp`, `.cxx`, `.hpp`, `.hh`, `.hxx` | C-like lexer |
+| C# | `.cs` | C-like lexer |
+| Go | `.go` | C-like lexer |
+| Rust | `.rs` | C-like lexer |
+| PHP | `.php`, `.phtml` | PHP lexer with HTML escapes |
+| Ruby | `.rb`, `.rake`, `Gemfile` | Ruby line lexer |
+| Swift | `.swift` | C-like lexer |
+| Kotlin | `.kt`, `.kts` | C-like lexer |
+| SQL | `.sql` | SQL keyword lexer |
+| HTML | `.html`, `.htm` | tag/attribute lexer |
+| CSS | `.css`, `.scss`, `.sass`, `.less` | CSS selector/property lexer |
+| Shell | `.sh`, `.bash`, `.zsh`, `.fish` | shell line lexer |
+| JSON | `.json`, `.jsonc` | structural lexer |
+| YAML | `.yml`, `.yaml` | indentation-aware key/value lexer |
+| R | `.r` | R line lexer |
+| Markdown | `.md`, `.mdx`, `.markdown` | markdown block/inline lexer |
+| Plain text | `.txt`, unknown | no-op highlighter |
+
+## Architecture Direction
+
+Use a language detector that maps file extension, filename, and shebang to a highlighter. Highlighters should expose a small interface that accepts a line plus bounded surrounding state and returns colored spans.
+
+The editor core should keep syntax work disposable: if a line is not visible and not near the viewport, it does not need to be highlighted yet.
+
+## Deferred Work
+
+- Tree-sitter or parser-backed highlighting is not assumed. If introduced later, it must prove it can meet the benchmark targets without whole-file startup work.
+- Semantic highlighting is out of scope because it requires language servers or project analysis.
+- Formatting remains explicit and single-file only, if added later.
