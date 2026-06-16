@@ -70,6 +70,37 @@ struct FileSnapshot: Equatable {
     }
 }
 
+enum EditorPreferences {
+    private static let fontSizeKey = "editor.fontSize"
+    private static let windowFrameKey = "window.frame"
+    static let defaultFontSize: CGFloat = 13
+
+    static var fontSize: CGFloat {
+        get {
+            let stored = UserDefaults.standard.double(forKey: fontSizeKey)
+            guard stored > 0 else { return defaultFontSize }
+            return min(24, max(10, CGFloat(stored)))
+        }
+        set {
+            UserDefaults.standard.set(Double(min(24, max(10, newValue))), forKey: fontSizeKey)
+        }
+    }
+
+    static var savedWindowFrame: NSRect? {
+        get {
+            let value = UserDefaults.standard.string(forKey: windowFrameKey) ?? ""
+            return NSRectFromString(value).isEmpty ? nil : NSRectFromString(value)
+        }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(NSStringFromRect(newValue), forKey: windowFrameKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: windowFrameKey)
+            }
+        }
+    }
+}
+
 enum EditorLanguage: String, CaseIterable {
     case plainText = "text"
     case typeScript = "typescript"
@@ -1605,13 +1636,13 @@ final class FastFileView: NSView {
     }
 
     private var buffer: TextBuffer
-    private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-    private let lineNumberFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    private var font: NSFont
+    private var lineNumberFont: NSFont
     private let lineNumberColor = NSColor.secondaryLabelColor
     private let caretColor = NSColor.controlAccentColor
-    private let lineHeight: CGFloat
-    private let charWidth: CGFloat
-    private let gutterWidth: CGFloat
+    private var lineHeight: CGFloat
+    private var charWidth: CGFloat
+    private var gutterWidth: CGFloat
     private let horizontalPadding: CGFloat = 12
     private var caretLine = 0
     private var caretColumn = 0
@@ -1632,6 +1663,9 @@ final class FastFileView: NSView {
 
     init(buffer: TextBuffer) {
         self.buffer = buffer
+        let fontSize = EditorPreferences.fontSize
+        self.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        self.lineNumberFont = NSFont.monospacedSystemFont(ofSize: max(10, fontSize - 1), weight: .regular)
         self.lineHeight = ceil(font.ascender - font.descender + font.leading) + 11
         self.charWidth = max(1, "W".size(withAttributes: [.font: font]).width)
         let digits = max(2, String(buffer.lineCount).count)
@@ -2444,6 +2478,23 @@ final class FastFileView: NSView {
         resizeForBuffer()
         setNeedsDisplay(bounds)
         displayIfNeeded()
+    }
+
+    var currentFontSize: CGFloat {
+        font.pointSize
+    }
+
+    func applyPreferences() {
+        let fontSize = EditorPreferences.fontSize
+        font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        lineNumberFont = NSFont.monospacedSystemFont(ofSize: max(10, fontSize - 1), weight: .regular)
+        lineHeight = ceil(font.ascender - font.descender + font.leading) + 11
+        charWidth = max(1, "W".size(withAttributes: [.font: font]).width)
+        let digits = max(2, String(buffer.lineCount).count)
+        gutterWidth = CGFloat(digits) * max(1, "8".size(withAttributes: [.font: lineNumberFont]).width) + 18
+        attributedLineCache.removeAll(keepingCapacity: true)
+        resizeForBuffer()
+        setNeedsDisplay(bounds)
     }
 
     private func moveCaret(line: Int, column: Int, extending: Bool = false) {
@@ -3282,6 +3333,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         confirmCloseDirtyDocuments()
     }
 
+    func windowDidMove(_ notification: Notification) {
+        EditorPreferences.savedWindowFrame = window.frame
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        EditorPreferences.savedWindowFrame = window.frame
+    }
+
     @objc private func saveDocument(_ sender: Any?) {
         guard let document = selectedDocument() else {
             NSSound.beep()
@@ -3305,6 +3364,31 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
     @objc private func closeCurrentTab(_ sender: Any?) {
         guard let item = tabView.selectedTabViewItem else { return }
         close(item: item)
+    }
+
+    @objc private func showPreferencesPanel(_ sender: Any?) {
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
+        field.stringValue = String(format: "%.0f", EditorPreferences.fontSize)
+        field.placeholderString = "Font size"
+
+        let alert = NSAlert()
+        alert.messageText = "Preferences"
+        alert.informativeText = "Editor font size"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Apply")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn,
+                  let self,
+                  let value = Double(field.stringValue)
+            else {
+                return
+            }
+            EditorPreferences.fontSize = CGFloat(value)
+            for document in self.documentsByPath.values {
+                document.fileView.applyPreferences()
+            }
+        }
     }
 
     @objc private func undoEdit(_ sender: Any?) {
@@ -3423,7 +3507,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
             return true
         }
 
-        if action == #selector(openDocument(_:)) {
+        if action == #selector(openDocument(_:)) || action == #selector(showPreferencesPanel(_:)) {
             return true
         }
 
@@ -3458,7 +3542,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         window.title = "Artisan"
         window.isRestorable = false
         window.delegate = self
-        window.center()
+        if let savedFrame = EditorPreferences.savedWindowFrame {
+            window.setFrame(savedFrame, display: false)
+        } else {
+            window.center()
+        }
         tabView.frame = window.contentView?.bounds ?? .zero
         tabView.autoresizingMask = [.width, .height]
         tabView.delegate = self
@@ -3478,6 +3566,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         mainMenu.addItem(windowMenuItem)
 
         let appMenu = NSMenu()
+        let preferencesItem = appMenu.addItem(withTitle: "Preferences...", action: #selector(showPreferencesPanel(_:)), keyEquivalent: ",")
+        preferencesItem.target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Artisan", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
 
@@ -4618,6 +4709,70 @@ func runWebScriptingHighlightingBenchmarkIfRequested() {
     }
 }
 
+func runPreferencesBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-preferences"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    let oldFontSize = EditorPreferences.fontSize
+    let oldFrame = EditorPreferences.savedWindowFrame
+    defer {
+        EditorPreferences.fontSize = oldFontSize
+        EditorPreferences.savedWindowFrame = oldFrame
+    }
+
+    do {
+        var failures: [String] = []
+
+        EditorPreferences.fontSize = 17
+        let buffer = try TextBuffer(path: path)
+        let fileView = FastFileView(buffer: buffer)
+        if Int(fileView.currentFontSize.rounded()) != 17 {
+            failures.append("new view should use persisted font size 17, got \(fileView.currentFontSize)")
+        }
+
+        EditorPreferences.fontSize = 15
+        fileView.applyPreferences()
+        if Int(fileView.currentFontSize.rounded()) != 15 {
+            failures.append("open view should apply persisted font size 15, got \(fileView.currentFontSize)")
+        }
+
+        let frame = NSRect(x: 44, y: 55, width: 900, height: 640)
+        EditorPreferences.savedWindowFrame = frame
+        guard let restoredFrame = EditorPreferences.savedWindowFrame,
+              NSEqualRects(restoredFrame, frame)
+        else {
+            failures.append("window frame preference did not round-trip")
+            if let restoredFrame = EditorPreferences.savedWindowFrame {
+                failures.append("restored frame was \(NSStringFromRect(restoredFrame))")
+            }
+            if !failures.isEmpty {
+                for failure in failures {
+                    fputs("benchmark error: \(failure)\n", stderr)
+                }
+                exit(1)
+            }
+            return
+        }
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.preferences=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -4633,6 +4788,7 @@ runTSJSHighlightingBenchmarkIfRequested()
 runDocDataHighlightingBenchmarkIfRequested()
 runCFamilyHighlightingBenchmarkIfRequested()
 runWebScriptingHighlightingBenchmarkIfRequested()
+runPreferencesBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()
