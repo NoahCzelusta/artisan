@@ -11,3 +11,7 @@ Triage uses the default five-label vocabulary: `needs-triage`, `needs-info`, `re
 ### Domain docs
 
 This repo uses a single-context domain-doc layout with `CONTEXT.md` at the repo root and ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+
+### Repo-local skills
+
+When the user asks to cut, publish, ship, or verify an Artisan release, read and follow `skills/cut-artisan-release/SKILL.md`.

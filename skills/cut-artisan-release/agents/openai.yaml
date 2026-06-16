@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cut Artisan Release"
+  short_description: "Release Artisan through GitHub and Homebrew"
+  default_prompt: "Use $cut-artisan-release to cut the next Artisan release."
