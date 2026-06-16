@@ -2021,22 +2021,13 @@ final class FastFileView: NSView {
             }
             drawFindHighlights(onLine: line, atY: y)
             drawSelectionBackground(onLine: line, atY: y)
-
-            let lineNumber = "\(line + 1)" as NSString
-            let lineNumberSize = lineNumber.size(withAttributes: lineNumberAttributes)
-            lineNumber.draw(
-                at: NSPoint(x: gutterWidth - lineNumberSize.width - 8, y: y + 2),
-                withAttributes: lineNumberAttributes
-            )
-
             drawHighlightedLine(line, atY: y)
         }
+        drawStickyGutter(in: visibleRect, startLine: startLine, endLine: endLine, attributes: lineNumberAttributes)
 
-        let caretY = CGFloat(caretLine) * lineHeight
-        let caret = caretRect()
-        if visibleRect.intersects(caret) {
+        if let caret = visibleCaretRect(in: visibleRect) {
             caretColor.setFill()
-            NSRect(x: caret.minX, y: caretY + 2, width: caret.width, height: lineHeight - 4).fill()
+            caret.fill()
         }
     }
 
@@ -2209,6 +2200,36 @@ final class FastFileView: NSView {
         )
     }
 
+    private func visibleCaretRect(in visibleRect: NSRect) -> NSRect? {
+        let caret = caretRect()
+        guard visibleRect.intersects(caret) else {
+            return nil
+        }
+
+        let drawRect = NSRect(
+            x: caret.minX,
+            y: CGFloat(caretLine) * lineHeight + 2,
+            width: caret.width,
+            height: lineHeight - 4
+        )
+        let textViewport = textViewportRect(in: visibleRect)
+        let clipped = drawRect.intersection(textViewport)
+        guard !clipped.isNull, clipped.width > 0, clipped.height > 0 else {
+            return nil
+        }
+
+        return clipped
+    }
+
+    private func textViewportRect(in visibleRect: NSRect) -> NSRect {
+        NSRect(
+            x: visibleRect.minX + gutterWidth,
+            y: visibleRect.minY,
+            width: max(0, visibleRect.width - gutterWidth),
+            height: visibleRect.height
+        )
+    }
+
     private func currentLineHighlightRect(in visibleRect: NSRect) -> NSRect {
         NSRect(
             x: visibleRect.minX,
@@ -2216,6 +2237,52 @@ final class FastFileView: NSView {
             width: visibleRect.width,
             height: lineHeight
         )
+    }
+
+    private func lineNumberRect(
+        for line: Int,
+        in visibleRect: NSRect,
+        attributes: [NSAttributedString.Key: Any]
+    ) -> NSRect {
+        let lineNumber = "\(line + 1)" as NSString
+        let lineNumberSize = lineNumber.size(withAttributes: attributes)
+        return NSRect(
+            x: visibleRect.minX + gutterWidth - lineNumberSize.width - 8,
+            y: CGFloat(line) * lineHeight + 2,
+            width: lineNumberSize.width,
+            height: lineNumberSize.height
+        )
+    }
+
+    private func drawStickyGutter(
+        in visibleRect: NSRect,
+        startLine: Int,
+        endLine: Int,
+        attributes: [NSAttributedString.Key: Any]
+    ) {
+        NSColor.textBackgroundColor.setFill()
+        NSRect(
+            x: visibleRect.minX,
+            y: visibleRect.minY,
+            width: gutterWidth,
+            height: visibleRect.height
+        ).fill()
+
+        NSColor.separatorColor.withAlphaComponent(0.35).setFill()
+        NSRect(
+            x: visibleRect.minX + gutterWidth - 1,
+            y: visibleRect.minY,
+            width: 1,
+            height: visibleRect.height
+        ).fill()
+
+        for line in startLine...endLine {
+            let lineNumber = "\(line + 1)" as NSString
+            lineNumber.draw(
+                at: lineNumberRect(for: line, in: visibleRect, attributes: attributes).origin,
+                withAttributes: attributes
+            )
+        }
     }
 
     private func drawFindHighlights(onLine line: Int, atY y: CGFloat) {
@@ -2432,12 +2499,12 @@ final class FastFileView: NSView {
     }
 
     private func moveToFileStart(extending: Bool = false) {
-        moveCaret(line: 0, column: 0, extending: extending)
+        moveCaret(line: 0, column: caretColumn, extending: extending)
     }
 
     private func moveToFileEnd(extending: Bool = false) {
         let lastLine = buffer.lineCount - 1
-        moveCaret(line: lastLine, column: buffer.lineText(at: lastLine).count, extending: extending)
+        moveCaret(line: lastLine, column: caretColumn, extending: extending)
     }
 
     private func moveWordLeft(extending: Bool = false) {
@@ -2948,13 +3015,31 @@ final class FastFileView: NSView {
         resizeForBuffer()
         var failures: [String] = []
 
+        func keyEvent(
+            flags: NSEvent.ModifierFlags,
+            keyCode: UInt16
+        ) -> NSEvent {
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: flags,
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: "",
+                charactersIgnoringModifiers: "",
+                isARepeat: false,
+                keyCode: keyCode
+            )!
+        }
+
         func expect(_ label: String, line expectedLine: Int, column expectedColumn: Int) {
             if caretLine != expectedLine || caretColumn != expectedColumn {
                 failures.append("\(label): expected \(expectedLine):\(expectedColumn), got \(caretLine):\(caretColumn)")
             }
         }
 
-        moveToFileStart()
+        moveCaret(line: 0, column: 0)
         expect("file start", line: 0, column: 0)
 
         moveCharacterRight()
@@ -2994,17 +3079,28 @@ final class FastFileView: NSView {
         expect("character right across newline", line: 2, column: 0)
 
         moveToFileEnd()
-        expect("file end", line: 2, column: 9)
+        expect("file end", line: 2, column: 0)
 
         moveCharacterRight()
-        expect("character right at eof", line: 2, column: 9)
+        expect("character right at file-edge column", line: 2, column: 1)
 
-        moveToFileStart()
+        moveCaret(line: 0, column: 0)
         movePageDown()
         expect("page down clamps to file end line", line: 2, column: 0)
 
         movePageUp()
         expect("page up clamps to file start line", line: 0, column: 0)
+
+        moveCaret(line: 1, column: 6)
+        keyDown(with: keyEvent(flags: .command, keyCode: 125))
+        expect("command down preserves file-edge column", line: 2, column: 6)
+
+        keyDown(with: keyEvent(flags: .command, keyCode: 126))
+        expect("command up preserves file-edge column", line: 0, column: 6)
+
+        moveCaret(line: 1, column: 15)
+        keyDown(with: keyEvent(flags: .command, keyCode: 125))
+        expect("command down clamps preserved column", line: 2, column: 9)
 
         return failures
     }
@@ -3070,6 +3166,34 @@ final class FastFileView: NSView {
             failures.append("current-line highlight should cover the horizontal viewport; visible=\(NSStringFromRect(afterCommandRight)) highlight=\(NSStringFromRect(highlight))")
         }
 
+        let lineNumberAttributes: [NSAttributedString.Key: Any] = [
+            .font: lineNumberFont,
+            .foregroundColor: lineNumberColor
+        ]
+        let lineNumber = lineNumberRect(for: 0, in: afterCommandRight, attributes: lineNumberAttributes)
+        let expectedMaxX = afterCommandRight.minX + gutterWidth - 8
+        if abs(lineNumber.maxX - expectedMaxX) > 1 {
+            failures.append("line number should stay sticky at x=\(expectedMaxX), got \(lineNumber.maxX)")
+        }
+
+        moveCaret(line: 0, column: min(firstLineLength, 80))
+        let caretBehindGutterX = max(0, caretRect().minX - (gutterWidth / 2))
+        scrollView.contentView.scroll(to: NSPoint(x: caretBehindGutterX, y: 0))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        let behindGutterVisible = scrollView.contentView.bounds
+        let stickyGutter = NSRect(
+            x: behindGutterVisible.minX,
+            y: behindGutterVisible.minY,
+            width: gutterWidth,
+            height: behindGutterVisible.height
+        )
+        if !stickyGutter.intersects(caretRect()) {
+            failures.append("benchmark setup should place caret under sticky gutter; visible=\(NSStringFromRect(behindGutterVisible)) caret=\(NSStringFromRect(caretRect()))")
+        }
+        if visibleCaretRect(in: behindGutterVisible) != nil {
+            failures.append("caret should not draw through sticky line-number gutter")
+        }
+
         let clickColumn = Int(round((afterCommandRight.midX - gutterWidth - horizontalPadding) / charWidth))
         moveCaret(line: 0, column: clickColumn)
         if !caretIsVisible(in: scrollView.contentView.bounds) {
@@ -3101,24 +3225,24 @@ final class FastFileView: NSView {
             }
         }
 
-        moveToFileStart()
+        moveCaret(line: 0, column: 0)
         moveCharacterRight(extending: true)
         expect("shift right", "0:0-0:1")
 
-        moveToFileStart()
+        moveCaret(line: 0, column: 0)
         moveWordRight(extending: true)
         expect("shift option right", "0:0-0:5")
 
         moveWordRight(extending: true)
         expect("shift option right second word", "0:0-0:10")
 
-        moveToFileStart()
+        moveCaret(line: 0, column: 0)
         moveToLineEnd(extending: true)
         expect("shift command right", "0:0-0:16")
 
-        moveToFileStart()
+        moveCaret(line: 0, column: 0)
         moveToFileEnd(extending: true)
-        expect("shift command down", "0:0-2:9")
+        expect("shift command down", "0:0-2:0")
 
         moveCaret(line: 0, column: 0)
         moveCaret(line: 1, column: 8, extending: true)
@@ -3556,14 +3680,15 @@ final class FastFileView: NSView {
     private func scrollCaretToVisible() {
         guard let scrollView = enclosingScrollView else { return }
         let visible = scrollView.contentView.bounds
+        let textViewport = textViewportRect(in: visible)
         let targetRect = caretRect().insetBy(dx: -horizontalPadding, dy: -4)
         let maxX = max(0, bounds.width - visible.width)
         let maxY = max(0, bounds.height - visible.height)
         var target = visible.origin
 
-        if targetRect.minX < visible.minX {
-            target.x = targetRect.minX
-        } else if targetRect.maxX > visible.maxX {
+        if targetRect.minX < textViewport.minX {
+            target.x = targetRect.minX - gutterWidth
+        } else if targetRect.maxX > textViewport.maxX {
             target.x = targetRect.maxX - visible.width
         }
 
@@ -3608,13 +3733,12 @@ final class FastFileView: NSView {
 
     private func handleClipViewBoundsChanged(_ visibleRect: NSRect) {
         let requestedEndLine = Int(ceil(visibleRect.maxY / lineHeight)) + 2
-        guard requestedEndLine >= buffer.indexedLineCount, !buffer.isFullyIndexed else {
-            return
+        if requestedEndLine >= buffer.indexedLineCount, !buffer.isFullyIndexed {
+            buffer.ensureFullyIndexed()
+            resizeForBuffer()
+            indexOnScrollCount += 1
         }
 
-        buffer.ensureFullyIndexed()
-        resizeForBuffer()
-        indexOnScrollCount += 1
         setNeedsDisplay(visibleRect)
     }
 
@@ -3671,6 +3795,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         defer: false
     )
     private let tabView = NSTabView()
+    private let rootStack = NSStackView()
+    private let tabBarScrollView = NSScrollView()
+    private let tabBarContentView = NSView()
+    private let tabBarStack = NSStackView()
+    private var tabButtonsByItem: [NSTabViewItem: NSButton] = [:]
     private var documentsByPath: [String: TabDocument] = [:]
     private var documentsByItem: [NSTabViewItem: TabDocument] = [:]
     private var pendingInvocations: [String: PendingInvocation] = [:]
@@ -3747,6 +3876,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
 
     func windowDidResize(_ notification: Notification) {
         EditorPreferences.savedWindowFrame = window.frame
+        layoutTabBar()
+        scrollSelectedTabButtonIntoView()
     }
 
     @objc private func saveDocument(_ sender: Any?) {
@@ -3772,6 +3903,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
     @objc private func closeCurrentTab(_ sender: Any?) {
         guard let item = tabView.selectedTabViewItem else { return }
         close(item: item)
+    }
+
+    @objc private func selectNextTab(_ sender: Any?) {
+        selectTab(offset: 1)
+    }
+
+    @objc private func selectPreviousTab(_ sender: Any?) {
+        selectTab(offset: -1)
+    }
+
+    @objc private func selectTabButton(_ sender: NSButton) {
+        guard let item = tabButtonsByItem.first(where: { $0.value === sender })?.key else {
+            return
+        }
+
+        tabView.selectTabViewItem(item)
+        if let document = selectedDocument() {
+            window.makeFirstResponder(document.fileView)
+        }
+        updateTabButtons()
     }
 
     @objc private func showPreferencesPanel(_ sender: Any?) {
@@ -3910,6 +4061,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         close(item: tabViewItem)
     }
 
+    func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        updateTabButtons()
+        scrollSelectedTabButtonIntoView()
+        if let document = selectedDocument() {
+            window.makeFirstResponder(document.fileView)
+        }
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard let action = menuItem.action else {
             return true
@@ -3917,6 +4076,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
 
         if action == #selector(openDocument(_:)) || action == #selector(showPreferencesPanel(_:)) {
             return true
+        }
+
+        if action == #selector(selectNextTab(_:)) || action == #selector(selectPreviousTab(_:)) {
+            return tabView.numberOfTabViewItems > 1
         }
 
         guard let document = selectedDocument() else {
@@ -3955,10 +4118,42 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         } else {
             window.center()
         }
-        tabView.frame = window.contentView?.bounds ?? .zero
-        tabView.autoresizingMask = [.width, .height]
+
+        rootStack.orientation = .vertical
+        rootStack.alignment = .width
+        rootStack.distribution = .fill
+        rootStack.spacing = 0
+        rootStack.frame = window.contentView?.bounds ?? window.frame
+        rootStack.autoresizingMask = [.width, .height]
+
+        tabBarScrollView.hasHorizontalScroller = true
+        tabBarScrollView.hasVerticalScroller = false
+        tabBarScrollView.autohidesScrollers = true
+        tabBarScrollView.borderType = .noBorder
+        tabBarScrollView.drawsBackground = true
+        tabBarScrollView.backgroundColor = .windowBackgroundColor
+        tabBarScrollView.documentView = tabBarContentView
+        tabBarScrollView.isHidden = true
+        tabBarScrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        tabBarStack.orientation = .horizontal
+        tabBarStack.alignment = .centerY
+        tabBarStack.distribution = .gravityAreas
+        tabBarStack.spacing = 4
+        tabBarContentView.addSubview(tabBarStack)
+
+        tabView.tabViewType = .noTabsNoBorder
         tabView.delegate = self
-        window.contentView = tabView
+        tabView.translatesAutoresizingMaskIntoConstraints = false
+
+        if rootStack.arrangedSubviews.isEmpty {
+            rootStack.addArrangedSubview(tabBarScrollView)
+            rootStack.addArrangedSubview(tabView)
+            tabBarScrollView.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        }
+
+        window.contentView = rootStack
+        layoutTabBar()
     }
 
     private func buildMenu() {
@@ -4015,6 +4210,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         editMenuItem.submenu = editMenu
 
         let windowMenu = NSMenu(title: "Window")
+        let nextTabItem = windowMenu.addItem(withTitle: "Next Tab", action: #selector(selectNextTab(_:)), keyEquivalent: "\t")
+        nextTabItem.keyEquivalentModifierMask = [.control]
+        nextTabItem.target = self
+        let previousTabItem = windowMenu.addItem(withTitle: "Previous Tab", action: #selector(selectPreviousTab(_:)), keyEquivalent: "\t")
+        previousTabItem.keyEquivalentModifierMask = [.control, .shift]
+        previousTabItem.target = self
+        windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenuItem.submenu = windowMenu
@@ -4070,6 +4272,74 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         expectItem(editMenu, title: "Find Next", action: #selector(findNextResult(_:)), keyEquivalent: "g")
         expectItem(editMenu, title: "Find Previous", action: #selector(findPreviousResult(_:)), keyEquivalent: "g", modifiers: [.command, .shift])
         expectItem(windowMenu, title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        expectItem(windowMenu, title: "Next Tab", action: #selector(selectNextTab(_:)), keyEquivalent: "\t", modifiers: [.control])
+        expectItem(windowMenu, title: "Previous Tab", action: #selector(selectPreviousTab(_:)), keyEquivalent: "\t", modifiers: [.control, .shift])
+
+        return failures
+    }
+
+    func benchmarkTabNavigation(directory: URL) -> [String] {
+        buildMenu()
+        configureWindow()
+        window.setFrame(NSRect(x: 0, y: 0, width: 420, height: 260), display: false)
+        var failures: [String] = []
+        let paths = (0..<12).map {
+            directory.appendingPathComponent(String(format: "tab-%02d.txt", $0)).path
+        }
+        let response = open(paths: paths, invocationID: nil)
+        if !response.ok {
+            failures.append("open tabs failed: \(response.message)")
+            return failures
+        }
+        window.layoutIfNeeded()
+
+        if tabView.numberOfTabViewItems != paths.count {
+            failures.append("expected \(paths.count) tab view items, got \(tabView.numberOfTabViewItems)")
+        }
+        if tabButtonsByItem.count != paths.count {
+            failures.append("expected \(paths.count) custom tab buttons, got \(tabButtonsByItem.count)")
+        }
+        if tabView.tabViewType != .noTabsNoBorder {
+            failures.append("tab view should hide default overflowing tabs")
+        }
+        if tabBarScrollView.superview == nil {
+            failures.append("scrollable tab bar should be installed in the window")
+        }
+        if !tabBarScrollView.hasHorizontalScroller {
+            failures.append("tab bar should expose horizontal scrolling")
+        }
+        let contentWidth = tabBarScrollView.documentView?.frame.width ?? 0
+        let visibleWidth = tabBarScrollView.contentView.bounds.width
+        if contentWidth <= visibleWidth {
+            failures.append("many tabs should overflow into a scrollable document width; content=\(contentWidth), visible=\(visibleWidth)")
+        }
+
+        guard !tabView.tabViewItems.isEmpty else {
+            return failures
+        }
+        tabView.selectTabViewItem(tabView.tabViewItems[0])
+        selectNextTab(nil)
+        if tabView.indexOfTabViewItem(tabView.selectedTabViewItem!) != 1 {
+            failures.append("ctrl-tab next should select the second tab")
+        }
+        selectPreviousTab(nil)
+        if tabView.indexOfTabViewItem(tabView.selectedTabViewItem!) != 0 {
+            failures.append("ctrl-shift-tab previous should return to the first tab")
+        }
+        selectPreviousTab(nil)
+        if tabView.indexOfTabViewItem(tabView.selectedTabViewItem!) != tabView.numberOfTabViewItems - 1 {
+            failures.append("previous tab should wrap to the last tab")
+        }
+
+        if let selected = tabView.selectedTabViewItem,
+           let button = tabButtonsByItem[selected] {
+            let visible = tabBarScrollView.contentView.bounds
+            if !visible.insetBy(dx: -1, dy: 0).intersects(button.frame) {
+                failures.append("selected overflow tab button should be scrolled into view")
+            }
+        } else {
+            failures.append("selected tab should have a custom button")
+        }
 
         return failures
     }
@@ -4125,6 +4395,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         if let selectedDocument {
             tabView.selectTabViewItem(selectedDocument.item)
             window.makeFirstResponder(selectedDocument.fileView)
+            updateTabButtons()
         }
 
         window.makeKeyAndOrderFront(nil)
@@ -4213,6 +4484,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         return documentsByItem[item]
     }
 
+    private func selectTab(offset: Int) {
+        let items = tabView.tabViewItems
+        guard !items.isEmpty else { return }
+        let currentIndex = tabView.selectedTabViewItem.map { tabView.indexOfTabViewItem($0) } ?? 0
+        let nextIndex = (currentIndex + offset + items.count) % items.count
+        tabView.selectTabViewItem(items[nextIndex])
+        if let document = selectedDocument() {
+            window.makeFirstResponder(document.fileView)
+        }
+        updateTabButtons()
+        scrollSelectedTabButtonIntoView()
+    }
+
     private func markDirty(_ document: TabDocument) {
         guard !document.isDirty else { return }
         document.isDirty = true
@@ -4221,6 +4505,99 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
 
     private func updateTabLabel(_ document: TabDocument) {
         document.item.label = document.isDirty ? "\(document.displayName) *" : document.displayName
+        if let button = tabButtonsByItem[document.item] {
+            button.title = document.item.label
+            button.toolTip = document.path
+            layoutTabBar()
+        }
+    }
+
+    private func updateTabButtons() {
+        ensureTabButtonsForOpenDocuments()
+        let selected = tabView.selectedTabViewItem
+        for (item, button) in tabButtonsByItem {
+            button.state = item === selected ? .on : .off
+            button.contentTintColor = item === selected ? NSColor.controlAccentColor : nil
+        }
+        layoutTabBar()
+    }
+
+    private func ensureTabButtonsForOpenDocuments() {
+        tabBarScrollView.isHidden = tabView.numberOfTabViewItems <= 1
+        guard tabView.numberOfTabViewItems > 1 else {
+            return
+        }
+
+        for item in tabView.tabViewItems {
+            guard tabButtonsByItem[item] == nil,
+                  let document = documentsByItem[item]
+            else {
+                continue
+            }
+
+            addTabButton(for: document)
+        }
+    }
+
+    private func addTabButton(for document: TabDocument) {
+        guard tabButtonsByItem[document.item] == nil else {
+            return
+        }
+
+        let button = NSButton(title: document.item.label, target: self, action: #selector(selectTabButton(_:)))
+        button.setButtonType(.toggle)
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.font = NSFont.systemFont(ofSize: 12)
+        button.lineBreakMode = .byTruncatingMiddle
+        button.toolTip = document.path
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 88).isActive = true
+        button.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+
+        tabButtonsByItem[document.item] = button
+        tabBarStack.addArrangedSubview(button)
+    }
+
+    private func removeTabButton(for item: NSTabViewItem) {
+        guard let button = tabButtonsByItem.removeValue(forKey: item) else {
+            return
+        }
+
+        tabBarStack.removeArrangedSubview(button)
+        button.removeFromSuperview()
+        layoutTabBar()
+    }
+
+    private func layoutTabBar() {
+        guard tabBarScrollView.documentView === tabBarContentView else {
+            return
+        }
+
+        tabBarStack.layoutSubtreeIfNeeded()
+        let fittingSize = tabBarStack.fittingSize
+        let visibleWidth = max(tabBarScrollView.contentView.bounds.width, tabBarScrollView.bounds.width)
+        let height = max(30, tabBarScrollView.contentView.bounds.height, tabBarScrollView.bounds.height)
+        let contentWidth = max(visibleWidth, fittingSize.width + 16)
+
+        tabBarContentView.frame = NSRect(x: 0, y: 0, width: contentWidth, height: height)
+        tabBarStack.frame = NSRect(x: 8, y: 0, width: fittingSize.width, height: height)
+        tabBarStack.needsLayout = true
+        tabBarStack.layoutSubtreeIfNeeded()
+    }
+
+    private func scrollSelectedTabButtonIntoView() {
+        guard let selected = tabView.selectedTabViewItem,
+              let button = tabButtonsByItem[selected]
+        else {
+            return
+        }
+
+        layoutTabBar()
+        button.scrollToVisible(button.bounds.insetBy(dx: -8, dy: 0))
     }
 
     private func save(document: TabDocument) -> Bool {
@@ -4304,9 +4681,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         guard let document = documentsByItem[item] else { return }
         guard confirmClose(document: document) else { return }
 
+        removeTabButton(for: item)
         tabView.removeTabViewItem(item)
         documentsByItem.removeValue(forKey: item)
         documentsByPath.removeValue(forKey: document.path)
+        updateTabButtons()
 
         let affectedInvocationIDs = Set(document.waitingInvocations).union(
             pendingInvocations.values.compactMap { invocation in
@@ -5315,6 +5694,29 @@ func runHorizontalCaretVisibilityBenchmarkIfRequested() {
     }
 }
 
+@MainActor
+func runTabNavigationBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-tab-navigation"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let directory = URL(fileURLWithPath: args[modeIndex + 1], isDirectory: true).standardizedFileURL
+    _ = NSApplication.shared
+    let controller = AppController()
+    let failures = controller.benchmarkTabNavigation(directory: directory)
+    if !failures.isEmpty {
+        for failure in failures {
+            fputs("benchmark error: \(failure)\n", stderr)
+        }
+        exit(1)
+    }
+    print("benchmark.tab_navigation=PASS")
+    exit(0)
+}
+
 func runPreferencesBenchmarkIfRequested() {
     let args = CommandLine.arguments
     guard let modeIndex = args.firstIndex(of: "--benchmark-preferences"),
@@ -5457,6 +5859,7 @@ runCFamilyHighlightingBenchmarkIfRequested()
 runWebScriptingHighlightingBenchmarkIfRequested()
 runBuildConfigHighlightingBenchmarkIfRequested()
 runHorizontalCaretVisibilityBenchmarkIfRequested()
+runTabNavigationBenchmarkIfRequested()
 runPreferencesBenchmarkIfRequested()
 runEditorCoreBenchmarkIfRequested()
 

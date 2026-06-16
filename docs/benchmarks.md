@@ -17,7 +17,8 @@ The runner:
 - runs the app benchmark mode against the TypeScript fixture
 - runs the all-language large highlighting benchmark across every supported language id
 - runs focused highlighting checks for build/config formats: Makefile, Dockerfile, XML, and TOML
-- runs the horizontal caret visibility regression for long lines, Command-Right, click placement, and current-line highlighting
+- runs the horizontal caret visibility regression for long lines, Command-Right, click placement, sticky line numbers, gutter-clipped caret drawing, and current-line highlighting
+- runs the tab navigation regression for Ctrl-Tab wrapping and scrollable overflow tabs
 - measures cold CLI launch/open through `artisan`
 - checks results against `benchmarks/targets.env`
 
@@ -58,7 +59,11 @@ Benchmarks must cover user paths, not only convenient internal APIs:
 - keyboard navigation
 - click-to-caret
 - horizontal caret reveal after Command-Right on a long line
+- sticky line numbers in horizontally scrolled viewports
+- caret drawing clipped out of the sticky line-number gutter
 - current-line highlight in a horizontally scrolled viewport
+- Ctrl-Tab and Ctrl-Shift-Tab through many open tabs
+- scrollable tab overflow for one-window, many-file sessions
 - character insert
 - delete/backspace
 - newline insert

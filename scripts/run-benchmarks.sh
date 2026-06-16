@@ -134,5 +134,6 @@ done
 "$ROOT_DIR/scripts/check-all-language-highlighting-benchmarks.sh"
 "$ROOT_DIR/scripts/check-build-config-highlighting.sh"
 "$ROOT_DIR/scripts/check-horizontal-caret-visibility.sh"
+"$ROOT_DIR/scripts/check-tab-navigation.sh"
 
 echo "benchmark result: PASS"

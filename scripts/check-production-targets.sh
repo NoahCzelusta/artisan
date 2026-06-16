@@ -22,11 +22,13 @@ rg -q 'CLI="\$ROOT_DIR/\.build/release/artisan"' "$BENCH" || fail "benchmark run
 rg -q 'check-all-language-highlighting-benchmarks\.sh' "$BENCH" || fail "benchmark runner must include all-language highlighting gate"
 rg -q 'check-build-config-highlighting\.sh' "$BENCH" || fail "benchmark runner must include build/config highlighting gate"
 rg -q 'check-horizontal-caret-visibility\.sh' "$BENCH" || fail "benchmark runner must include horizontal caret visibility gate"
+rg -q 'check-tab-navigation\.sh' "$BENCH" || fail "benchmark runner must include tab navigation gate"
 
 test -x "$BUNDLE_SCRIPT" || fail "scripts/build-artisan-app.sh must exist and be executable"
 test -x "$ROOT_DIR/scripts/check-all-language-highlighting-benchmarks.sh" || fail "all-language highlighting gate must exist and be executable"
 test -x "$ROOT_DIR/scripts/check-build-config-highlighting.sh" || fail "build/config highlighting gate must exist and be executable"
 test -x "$ROOT_DIR/scripts/check-horizontal-caret-visibility.sh" || fail "horizontal caret visibility gate must exist and be executable"
+test -x "$ROOT_DIR/scripts/check-tab-navigation.sh" || fail "tab navigation gate must exist and be executable"
 rg -q 'swift build -c release' "$README" || fail "README must document release build"
 rg -q '\.build/release/artisan' "$README" || fail "README must document production artisan CLI path"
 rg -q '\.build/release/Artisan\.app' "$README" || fail "README must document local app bundle path"

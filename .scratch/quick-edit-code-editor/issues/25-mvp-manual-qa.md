@@ -51,7 +51,10 @@ The MVP is verified through real user interactions, not only implementation assu
 - Immediate scrollbar-to-bottom works after open.
 - Trackpad/mouse-wheel scrolling works.
 - Click-to-caret works after scrolling.
-- Keyboard navigation and shift selection work.
+- Keyboard navigation and shift selection work, including Command-Up/Down preserving the cursor column when jumping to file edges.
+- Ctrl-Tab and Ctrl-Shift-Tab cycle tabs and wrap around.
+- Overflow tabs remain clickable or reachable through the scrollable tab strip.
+- Line numbers remain sticky when horizontally scrolling long lines.
 - Clipboard and undo/redo work.
 - Find works.
 - Save and disk-change prompts work.
@@ -86,6 +89,10 @@ The MVP is verified through real user interactions, not only implementation assu
 - 2026-06-16: Added regression coverage for Makefile, Dockerfile, XML, and TOML dedicated highlighting via `scripts/check-build-config-highlighting.sh`.
 - 2026-06-16: Added regression coverage for long-line horizontal caret reveal, click placement after horizontal scroll, and current-line highlight coverage via `scripts/check-horizontal-caret-visibility.sh`.
 - 2026-06-16: Latest benchmark gate passed after these regressions with cold CLI open runs `188 207 197 224 205` ms; all 26 language ids passed with worst highlight average `0.0200` ms/line for TypeScript. Computer Use visually confirmed Makefile, Dockerfile, XML, TOML, and long-line TypeScript tabs; direct Computer Use actions were blocked, so Command-Right/click input used macOS System Events with Computer Use screenshots for verification.
+- 2026-06-16: Added regression coverage for Ctrl-Tab/Ctrl-Shift-Tab tab cycling, scrollable overflow tabs, sticky line numbers during horizontal scroll, and Command-Up/Down preserving cursor column at file edges.
+- 2026-06-16: Latest benchmark gate passed with open `8.72` ms, immediate bottom render `7.61` ms, scroll average `2.9168` ms, cold CLI open runs `211 211 215 203 196` ms, and all 26 language ids passing with worst highlight average `0.0201` ms/line for TypeScript.
+- 2026-06-16: Computer Use smoke verification passed for 13 open tabs: Ctrl-Tab wrapped from `tab-11.txt` to `long-line.ts`, Ctrl-Shift-Tab wrapped back to `tab-11.txt`, direct click selected the overflow `tab-11.txt` button, and the horizontally scrolled long-line view kept line numbers sticky on the left.
+- 2026-06-16: Fixed cursor bleed through the sticky line-number gutter. `scripts/check-horizontal-caret-visibility.sh` now asserts that the caret is not drawn when its document position is under the gutter, and Computer Use confirmed line numbers remain clean after forced horizontal scroll.
 
 ### Human QA checklist
 
@@ -98,8 +105,13 @@ The MVP is verified through real user interactions, not only implementation assu
 - [ ] Click into the editor before and after scrolling; confirm caret placement works.
 - [ ] Open a long single-line TypeScript file; press Command-Right and confirm the horizontal viewport scrolls so the caret remains visible.
 - [ ] Horizontally scroll a long line, click in the editor, and confirm the caret appears at the clicked position.
+- [ ] Horizontally scroll a long line and confirm line numbers remain sticky on the left.
+- [ ] Horizontally scroll a long line while the caret would be behind the line-number gutter; confirm no blue caret stroke appears over the line numbers.
 - [ ] Horizontally scroll a long line and confirm the current-line highlight remains visible across the scrolled viewport.
 - [ ] Exercise Option-arrow, Command-arrow, Shift-arrow, Shift-Option-arrow, and Shift-Command-arrow selection/navigation.
+- [ ] With the caret in the middle of a line, press Command-Down and Command-Up; confirm the caret keeps its column where the destination line is long enough and clamps only on shorter lines.
+- [ ] Open enough files to overflow the tab bar; confirm later tabs remain reachable through the horizontal tab scroller.
+- [ ] Press Ctrl-Tab and Ctrl-Shift-Tab; confirm the selected tab cycles forward/backward and wraps at both ends.
 - [ ] Copy, cut, paste, undo, and redo selected text.
 - [ ] Use find in the current file, including a match near the bottom of a large file.
 - [ ] Modify the same file externally while dirty in Artisan; confirm the disk-change protection appears before saving.
