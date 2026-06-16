@@ -77,13 +77,24 @@ scripts/uninstall-local.sh
 Create a local release-package dry run:
 
 ```bash
-ARTISAN_RELEASE_ALLOW_DIRTY=1 scripts/package-release.sh 0.1.0
+ARTISAN_RELEASE_ALLOW_DIRTY=1 scripts/package-release.sh 0.0.1
 scripts/check-release-package.sh
 ```
 
 This writes a versioned macOS zip, checksum, and generated Homebrew cask under
-`dist/` by default. Trusted teammate distribution still requires Developer ID
-signing and notarization; see [docs/distribution.md](docs/distribution.md).
+`dist/` by default.
+
+Install from the public Homebrew tap:
+
+```bash
+brew tap NoahCzelusta/artisan https://github.com/NoahCzelusta/artisan
+brew install --cask NoahCzelusta/artisan/artisan
+artisan README.md
+artisan --wait README.md
+```
+
+The first public cask is intentionally ad hoc signed while Developer ID signing
+and notarization remain deferred; see [docs/distribution.md](docs/distribution.md).
 
 ## Documentation
 

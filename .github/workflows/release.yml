@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version without the leading v, for example 0.1.0"
+        description: "Release version without the leading v, for example 0.0.1"
         required: true
         type: string
 
@@ -77,3 +77,25 @@ jobs:
             dist/artisan.rb \
             --verify-tag \
             --generate-notes
+
+      - name: Update same-repo Homebrew cask
+        if: github.ref_type == 'tag'
+        run: |
+          cp dist/artisan.rb /tmp/artisan.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main:refs/remotes/origin/main
+          git checkout -B main origin/main
+
+          mkdir -p Casks
+          cp /tmp/artisan.rb Casks/artisan.rb
+
+          if [[ -z "$(git status --porcelain Casks/artisan.rb)" ]]; then
+            echo "Casks/artisan.rb already up to date"
+            exit 0
+          fi
+
+          git add Casks/artisan.rb
+          git commit -m "Update Homebrew cask for $GITHUB_REF_NAME"
+          git push origin main

@@ -12,7 +12,7 @@ ARCHIVE="$DIST_DIR/$ARCHIVE_NAME"
 SHA_FILE="$ARCHIVE.sha256"
 STAGE_ROOT="$DIST_DIR/stage"
 STAGE="$STAGE_ROOT/$APP_NAME-v$VERSION-macos-$ARCH"
-CASK_FILE="$DIST_DIR/artisan.rb"
+CASK_FILE="${ARTISAN_CASK_FILE:-$DIST_DIR/artisan.rb}"
 REPOSITORY="${ARTISAN_RELEASE_REPOSITORY:-NoahCzelusta/artisan}"
 RELEASE_URL="${ARTISAN_RELEASE_URL:-https://github.com/$REPOSITORY/releases/download/v$VERSION/$ARCHIVE_NAME}"
 BUILD_NUMBER="${ARTISAN_BUILD_NUMBER:-$(cd "$ROOT_DIR" && git rev-list --count HEAD 2>/dev/null || printf '1')}"
@@ -41,6 +41,7 @@ if [[ "${ARTISAN_RELEASE_ALLOW_DIRTY:-0}" != "1" ]] && [[ -n "$(git status --sho
 fi
 
 mkdir -p "$DIST_DIR"
+mkdir -p "$(dirname "$CASK_FILE")"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
