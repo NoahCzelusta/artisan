@@ -68,6 +68,11 @@ The MVP is verified through real user interactions, not only implementation assu
 - 2026-06-16: Prepared the final MVP human QA checklist. Automated gates are passing, but this issue cannot be completed by the agent because Computer Use consistently fails to capture the Artisan window with `cgWindowNotFound`.
 - 2026-06-16: Latest full gate passed: release distribution plan, local install packaging, editor core, preferences, web/scripting highlighting, C-family highlighting, doc/data highlighting, TS/JS highlighting, language registry, native menus, find, undo/redo, selection editing/model, keyboard navigation, disk-change save protection, save operations, edit operations, CLI wait/open, plain text rendering, production targets, PRD check, and benchmark gate.
 - 2026-06-16: Latest benchmark gate passed with cold CLI open runs `139 146 149 152 151` ms; immediate bottom render was `9.21` ms and scroll averaged `4.9041` ms.
+- 2026-06-16: After restarting the app and granting additional Computer Use permissions, Computer Use now captures the Artisan window, tab state, editor screenshot, and scroll bar values correctly.
+- 2026-06-16: Direct Computer Use action tools still fail immediately after a successful state read with `Computer Use is not active for 'Artisan'`, so full manual QA remains `ready-for-human`.
+- 2026-06-16: Agent smoke verification passed with macOS accessibility input plus Computer Use visual confirmation: edited and saved `/tmp/artisan-ui-qa-1781625198.txt` to show `UI-OK alpha`, opened `large.ts`, set the vertical scrollbar to bottom, and confirmed lines `68067...68090` render with TypeScript highlighting.
+- 2026-06-16: Latest benchmark gate passed with cold CLI open runs `194 217 235 228 229` ms; immediate bottom render was `9.31` ms and scroll averaged `5.5916` ms.
+- 2026-06-16: Latest full scripted checks passed: release distribution plan, local install packaging, editor core, preferences, web/scripting highlighting, C-family highlighting, doc/data highlighting, TS/JS highlighting, language registry, native menus, find, undo/redo, selection editing/model, keyboard navigation, disk-change save protection, save operations, edit operations, CLI wait/open, plain text rendering, production targets, and PRD check.
 
 ### Human QA checklist
 
