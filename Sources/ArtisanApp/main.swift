@@ -13,9 +13,27 @@ struct OpenResponse: Codable {
     let message: String
 }
 
+enum HighlightKind: String {
+    case plain
+    case keyword
+    case string
+    case number
+    case comment
+    case punctuation
+    case tag
+    case attribute
+}
+
 struct HighlightSegment {
     let text: String
     let color: NSColor
+    let kind: HighlightKind
+
+    init(text: String, color: NSColor, kind: HighlightKind = .plain) {
+        self.text = text
+        self.color = color
+        self.kind = kind
+    }
 }
 
 struct TextPosition: Comparable, Equatable {
@@ -713,6 +731,8 @@ enum TypeScriptHighlighter: LineHighlighter {
     private static let number = NSColor.systemPurple
     private static let comment = NSColor.systemGreen
     private static let punctuation = NSColor.secondaryLabelColor
+    private static let tag = NSColor.systemTeal
+    private static let attribute = NSColor.systemOrange
 
     static func highlight(_ line: String) -> [HighlightSegment] {
         guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
@@ -720,9 +740,9 @@ enum TypeScriptHighlighter: LineHighlighter {
         var segments: [HighlightSegment] = []
         var index = line.startIndex
 
-        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor) {
+        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor, _ kind: HighlightKind = .plain) {
             guard start < end else { return }
-            segments.append(HighlightSegment(text: String(line[start..<end]), color: color))
+            segments.append(HighlightSegment(text: String(line[start..<end]), color: color, kind: kind))
         }
 
         while index < line.endIndex {
@@ -730,7 +750,45 @@ enum TypeScriptHighlighter: LineHighlighter {
             let next = line.index(after: index)
 
             if char == "/", next < line.endIndex, line[next] == "/" {
-                append(index, line.endIndex, comment)
+                append(index, line.endIndex, comment, .comment)
+                break
+            }
+
+            if char == "/", next < line.endIndex, line[next] == "*" {
+                var end = line.index(after: next)
+                while end < line.endIndex {
+                    let after = line.index(after: end)
+                    if line[end] == "*", after < line.endIndex, line[after] == "/" {
+                        end = line.index(after: after)
+                        break
+                    }
+                    end = after
+                }
+                append(index, end, comment, .comment)
+                index = end
+                continue
+            }
+
+            if char == "<", next < line.endIndex, (line[next].isLetter || line[next] == "/" || line[next] == ">") {
+                index = appendJSXTag(in: line, from: index, append: append)
+                continue
+            }
+
+            if char == "{", next < line.endIndex, line[next] == "/" {
+                append(index, next, punctuation, .punctuation)
+                index = next
+                continue
+            }
+
+            if char == "}", next < line.endIndex {
+                append(index, next, punctuation, .punctuation)
+                index = next
+                continue
+            }
+
+            if char == "/" && next < line.endIndex && line[next] == ">" {
+                append(index, line.index(after: next), punctuation, .punctuation)
+                index = line.index(after: next)
                 break
             }
 
@@ -751,7 +809,7 @@ enum TypeScriptHighlighter: LineHighlighter {
                     }
                     end = after
                 }
-                append(index, end, string)
+                append(index, end, string, .string)
                 index = end
                 continue
             }
@@ -761,7 +819,7 @@ enum TypeScriptHighlighter: LineHighlighter {
                 while end < line.endIndex, line[end].isNumber || line[end] == "." || line[end] == "_" {
                     end = line.index(after: end)
                 }
-                append(index, end, number)
+                append(index, end, number, .number)
                 index = end
                 continue
             }
@@ -777,13 +835,17 @@ enum TypeScriptHighlighter: LineHighlighter {
                     }
                 }
                 let word = String(line[index..<end])
-                append(index, end, keywords.contains(word) ? keyword : plain)
+                if keywords.contains(word) {
+                    append(index, end, keyword, .keyword)
+                } else {
+                    append(index, end, plain)
+                }
                 index = end
                 continue
             }
 
             if "{}[]().,:;+-*=<>!&|?/".contains(char) {
-                append(index, next, punctuation)
+                append(index, next, punctuation, .punctuation)
             } else {
                 append(index, next, plain)
             }
@@ -791,6 +853,87 @@ enum TypeScriptHighlighter: LineHighlighter {
         }
 
         return segments
+    }
+
+    private static func appendJSXTag(
+        in line: String,
+        from start: String.Index,
+        append: (String.Index, String.Index, NSColor, HighlightKind) -> Void
+    ) -> String.Index {
+        var index = start
+
+        func isNameCharacter(_ character: Character) -> Bool {
+            character.isLetter || character.isNumber || character == "_" || character == "-" || character == "$" || character == ":"
+        }
+
+        let afterOpen = line.index(after: index)
+        append(index, afterOpen, punctuation, .punctuation)
+        index = afterOpen
+
+        if index < line.endIndex, line[index] == "/" {
+            let afterSlash = line.index(after: index)
+            append(index, afterSlash, punctuation, .punctuation)
+            index = afterSlash
+        }
+
+        if index < line.endIndex, isNameCharacter(line[index]) {
+            var end = line.index(after: index)
+            while end < line.endIndex, isNameCharacter(line[end]) {
+                end = line.index(after: end)
+            }
+            append(index, end, tag, .tag)
+            index = end
+        }
+
+        while index < line.endIndex {
+            let char = line[index]
+            let next = line.index(after: index)
+
+            if char == ">" {
+                append(index, next, punctuation, .punctuation)
+                return next
+            }
+
+            if char == "/", next < line.endIndex, line[next] == ">" {
+                append(index, line.index(after: next), punctuation, .punctuation)
+                return line.index(after: next)
+            }
+
+            if char == "\"" || char == "'" {
+                let quote = char
+                var end = next
+                while end < line.endIndex {
+                    let after = line.index(after: end)
+                    if line[end] == quote {
+                        end = after
+                        break
+                    }
+                    end = after
+                }
+                append(index, end, string, .string)
+                index = end
+                continue
+            }
+
+            if isNameCharacter(char) {
+                var end = next
+                while end < line.endIndex, isNameCharacter(line[end]) {
+                    end = line.index(after: end)
+                }
+                append(index, end, attribute, .attribute)
+                index = end
+                continue
+            }
+
+            if "{}[]=.".contains(char) {
+                append(index, next, punctuation, .punctuation)
+            } else {
+                append(index, next, plain, .plain)
+            }
+            index = next
+        }
+
+        return index
     }
 }
 
@@ -3628,6 +3771,62 @@ func runLanguageRegistryBenchmarkIfRequested() {
     }
 }
 
+func runTSJSHighlightingBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-ts-js-highlighting"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let fixtureDirectory = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL
+
+    do {
+        var failures: [String] = []
+
+        func expectKinds(_ path: String, line: Int, contains requiredKinds: Set<HighlightKind>) throws {
+            let buffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent(path).path)
+            let kinds = Set(buffer.highlightedSegments(at: line).map(\.kind))
+            for kind in requiredKinds where !kinds.contains(kind) {
+                failures.append("\(path): line \(line + 1) missing \(kind.rawValue), got \(kinds.map(\.rawValue).sorted())")
+            }
+        }
+
+        let tsBuffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent("sample.ts").path)
+        if tsBuffer.languageID != "typescript" {
+            failures.append("sample.ts language expected typescript, got \(tsBuffer.languageID)")
+        }
+        try expectKinds("sample.ts", line: 0, contains: [.keyword, .number, .punctuation])
+        try expectKinds("sample.ts", line: 1, contains: [.comment])
+        try expectKinds("sample.ts", line: 2, contains: [.keyword, .string])
+        try expectKinds("sample.ts", line: 3, contains: [.keyword, .comment])
+
+        let tsxBuffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent("component.tsx").path)
+        if tsxBuffer.languageID != "typescript" {
+            failures.append("component.tsx language expected typescript, got \(tsxBuffer.languageID)")
+        }
+        try expectKinds("component.tsx", line: 0, contains: [.keyword, .tag, .attribute, .string, .punctuation])
+
+        let jsxBuffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent("module.jsx").path)
+        if jsxBuffer.languageID != "javascript" {
+            failures.append("module.jsx language expected javascript, got \(jsxBuffer.languageID)")
+        }
+        try expectKinds("module.jsx", line: 0, contains: [.keyword, .tag, .attribute, .string, .punctuation])
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.ts_js_highlighting=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -3639,6 +3838,7 @@ runUndoRedoBenchmarkIfRequested()
 runFindBenchmarkIfRequested()
 runNativeMenusBenchmarkIfRequested()
 runLanguageRegistryBenchmarkIfRequested()
+runTSJSHighlightingBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()

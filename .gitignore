@@ -40,4 +40,5 @@ dist/
 .scratch/selection-editing-fixtures/
 .scratch/selection-fixtures/
 .scratch/save-fixtures/
+.scratch/ts-js-highlighting-fixtures/
 .scratch/undo-redo-fixtures/

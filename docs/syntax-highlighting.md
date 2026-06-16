@@ -55,6 +55,10 @@ Unknown files use the `text` id and the plain-text highlighter. Known languages 
 
 Shebang detection is limited to the first line and maps common script runtimes such as Python, Ruby, Node/Deno, PHP, Rscript, and POSIX shells.
 
+## Implemented Highlighters
+
+- `typescript` and `javascript`: line-local lexical highlighting for keywords, line comments, inline block comments, strings, numbers, punctuation, and simple JSX/TSX tag and attribute spans.
+
 ## Deferred Work
 
 - Tree-sitter or parser-backed highlighting is not assumed. If introduced later, it must prove it can meet the benchmark targets without whole-file startup work.
