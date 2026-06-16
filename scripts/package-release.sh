@@ -96,7 +96,7 @@ cask "artisan" do
   desc "Fast native macOS editor for quick file edits"
   homepage "https://github.com/$REPOSITORY"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "Artisan.app"
   binary "artisan"
