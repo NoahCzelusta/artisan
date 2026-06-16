@@ -33,6 +33,7 @@ dist/
 .scratch/benchmark-results/
 .scratch/disk-change-fixtures/
 .scratch/edit-fixtures/
+.scratch/find-fixtures/
 .scratch/navigation-fixtures/
 .scratch/selection-editing-fixtures/
 .scratch/selection-fixtures/

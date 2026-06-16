@@ -678,6 +678,12 @@ final class FastFileView: NSView {
         let coalescesTyping: Bool
     }
 
+    private struct FindMatch: Equatable {
+        let line: Int
+        let startColumn: Int
+        let endColumn: Int
+    }
+
     private var buffer: TextBuffer
     private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     private let lineNumberFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -693,6 +699,9 @@ final class FastFileView: NSView {
     private var selectionActive: TextPosition?
     private var undoStack: [UndoEntry] = []
     private var redoStack: [UndoEntry] = []
+    private var findQuery = ""
+    private var findMatches: [FindMatch] = []
+    private var activeFindMatchIndex: Int?
     private var attributedLineCache: [Int: (version: Int, text: NSAttributedString)] = [:]
     var onEdit: (() -> Void)?
     private(set) var drawCallCount = 0
@@ -751,6 +760,7 @@ final class FastFileView: NSView {
                 NSColor.selectedTextBackgroundColor.withAlphaComponent(0.22).setFill()
                 NSRect(x: 0, y: y, width: visibleRect.width, height: lineHeight).fill()
             }
+            drawFindHighlights(onLine: line, atY: y)
             drawSelectionBackground(onLine: line, atY: y)
 
             let lineNumber = "\(line + 1)" as NSString
@@ -931,6 +941,24 @@ final class FastFileView: NSView {
         NSRect(x: startX, y: y + 1, width: width, height: lineHeight - 2).fill()
     }
 
+    private func drawFindHighlights(onLine line: Int, atY y: CGFloat) {
+        let matches = findMatches(onLine: line)
+        guard !matches.isEmpty else {
+            return
+        }
+
+        for match in matches {
+            let isActive = activeFindMatchIndex.map { findMatches.indices.contains($0) && findMatches[$0] == match } ?? false
+            let color = isActive
+                ? NSColor.systemYellow.withAlphaComponent(0.55)
+                : NSColor.systemYellow.withAlphaComponent(0.28)
+            color.setFill()
+            let startX = gutterWidth + horizontalPadding + CGFloat(match.startColumn) * charWidth
+            let width = max(2, CGFloat(match.endColumn - match.startColumn) * charWidth)
+            NSRect(x: startX, y: y + 3, width: width, height: lineHeight - 6).fill()
+        }
+    }
+
     private func selectedColumns(onLine line: Int) -> (start: Int, end: Int)? {
         guard let range = normalizedSelectionRange(), line >= range.start.line, line <= range.end.line else {
             return nil
@@ -953,6 +981,94 @@ final class FastFileView: NSView {
         }
 
         return (0, lineLength)
+    }
+
+    private func findMatches(onLine line: Int) -> [FindMatch] {
+        findMatches.filter { $0.line == line }
+    }
+
+    var hasFindQuery: Bool {
+        !findQuery.isEmpty
+    }
+
+    @discardableResult
+    func setFindQuery(_ query: String) -> Int {
+        findQuery = query
+        findMatches.removeAll(keepingCapacity: true)
+        activeFindMatchIndex = nil
+        guard !query.isEmpty, !query.contains("\n") else {
+            setNeedsDisplay(bounds)
+            return 0
+        }
+
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        for line in 0..<buffer.lineCount {
+            findMatches.append(contentsOf: matches(for: query, onLine: line))
+        }
+
+        if !findMatches.isEmpty {
+            let reference = currentPosition()
+            let index = findMatches.firstIndex {
+                $0.line > reference.line || ($0.line == reference.line && $0.startColumn >= reference.column)
+            } ?? 0
+            activateFindMatch(at: index)
+        } else {
+            setNeedsDisplay(bounds)
+        }
+        return findMatches.count
+    }
+
+    @discardableResult
+    func findNextMatch() -> Bool {
+        guard !findMatches.isEmpty else {
+            return false
+        }
+        let nextIndex = activeFindMatchIndex.map { ($0 + 1) % findMatches.count } ?? 0
+        activateFindMatch(at: nextIndex)
+        return true
+    }
+
+    @discardableResult
+    func findPreviousMatch() -> Bool {
+        guard !findMatches.isEmpty else {
+            return false
+        }
+        let previousIndex = activeFindMatchIndex.map { ($0 - 1 + findMatches.count) % findMatches.count } ?? (findMatches.count - 1)
+        activateFindMatch(at: previousIndex)
+        return true
+    }
+
+    private func matches(for query: String, onLine line: Int) -> [FindMatch] {
+        let text = buffer.lineText(at: line)
+        guard !text.isEmpty else {
+            return []
+        }
+
+        var results: [FindMatch] = []
+        var searchStart = text.startIndex
+        while searchStart < text.endIndex,
+              let range = text.range(of: query, options: [], range: searchStart..<text.endIndex) {
+            let startColumn = text.distance(from: text.startIndex, to: range.lowerBound)
+            let endColumn = text.distance(from: text.startIndex, to: range.upperBound)
+            results.append(FindMatch(line: line, startColumn: startColumn, endColumn: endColumn))
+            searchStart = range.upperBound
+        }
+        return results
+    }
+
+    private func activateFindMatch(at index: Int) {
+        guard findMatches.indices.contains(index) else {
+            return
+        }
+        activeFindMatchIndex = index
+        let match = findMatches[index]
+        setSelection(
+            anchor: TextPosition(line: match.line, column: match.startColumn),
+            active: TextPosition(line: match.line, column: match.endColumn)
+        )
+        scrollLineToVisible(match.line)
+        setNeedsDisplay(enclosingScrollView?.contentView.bounds ?? bounds)
     }
 
     private func visibleLineCount() -> Int {
@@ -1896,6 +2012,83 @@ final class FastFileView: NSView {
         return []
     }
 
+    func benchmarkFind() -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        var failures: [String] = []
+
+        func expect(_ actual: String, _ expected: String, _ label: String) {
+            if actual != expected {
+                failures.append("\(label): expected \(expected), got \(actual)")
+            }
+        }
+
+        func expectColumns(_ line: Int, _ expected: [(Int, Int)], _ label: String) {
+            let actual = findMatches(onLine: line).map { ($0.startColumn, $0.endColumn) }
+            guard actual.count == expected.count else {
+                failures.append("\(label): expected \(expected), got \(actual)")
+                return
+            }
+            for index in expected.indices where actual[index] != expected[index] {
+                failures.append("\(label): expected \(expected), got \(actual)")
+                return
+            }
+        }
+
+        moveCaret(line: 0, column: 0)
+        let alphaCount = setFindQuery("alpha")
+        if alphaCount != 3 {
+            failures.append("alpha match count: expected 3, got \(alphaCount)")
+        }
+        expect(selectionDescription(), "0:0-0:5", "initial alpha selection")
+        expectColumns(2, [(0, 5), (11, 16)], "visible alpha match columns")
+
+        _ = findNextMatch()
+        expect(selectionDescription(), "2:0-2:5", "find next wraps to second line")
+        _ = findNextMatch()
+        expect(selectionDescription(), "2:11-2:16", "find next advances on same line")
+        _ = findNextMatch()
+        expect(selectionDescription(), "0:0-0:5", "find next wraps to first match")
+        _ = findPreviousMatch()
+        expect(selectionDescription(), "2:11-2:16", "find previous wraps to last match")
+
+        let missingCount = setFindQuery("missing")
+        if missingCount != 0 {
+            failures.append("missing match count: expected 0, got \(missingCount)")
+        }
+        expect(selectionDescription(), "2:11-2:16", "missing query preserves current selection")
+
+        return failures
+    }
+
+    func benchmarkLargeFind() -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        var failures: [String] = []
+        moveCaret(line: 0, column: 0)
+
+        let count = setFindQuery("needle")
+        if count != 3 {
+            failures.append("large needle match count: expected 3, got \(count)")
+        }
+        if !selectionDescription().hasPrefix("99:") {
+            failures.append("large initial match should be near line 100, got \(selectionDescription())")
+        }
+        _ = findNextMatch()
+        if !selectionDescription().hasPrefix("14999:") {
+            failures.append("large next match should be near line 15000, got \(selectionDescription())")
+        }
+        _ = findNextMatch()
+        if !selectionDescription().hasPrefix("29949:") {
+            failures.append("large next match should be near line 29950, got \(selectionDescription())")
+        }
+        _ = findPreviousMatch()
+        if !selectionDescription().hasPrefix("14999:") {
+            failures.append("large previous match should return near line 15000, got \(selectionDescription())")
+        }
+        return failures
+    }
+
     func benchmarkHighlighting(iterations: Int) -> Double {
         buffer.ensureFullyIndexed()
         let start = DispatchTime.now().uptimeNanoseconds
@@ -2103,6 +2296,65 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         close(item: item)
     }
 
+    @objc private func showFindPanel(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.placeholderString = "Find"
+
+        let alert = NSAlert()
+        alert.messageText = "Find in \(document.displayName)"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Find")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self, weak document] response in
+            guard response == .alertFirstButtonReturn,
+                  let self,
+                  let document
+            else {
+                return
+            }
+            let count = document.fileView.setFindQuery(field.stringValue)
+            if count == 0 {
+                NSSound.beep()
+            }
+            self.window.makeFirstResponder(document.fileView)
+        }
+    }
+
+    @objc private func findNextResult(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        guard document.fileView.hasFindQuery else {
+            showFindPanel(sender)
+            return
+        }
+        if !document.fileView.findNextMatch() {
+            NSSound.beep()
+        }
+        window.makeFirstResponder(document.fileView)
+    }
+
+    @objc private func findPreviousResult(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        guard document.fileView.hasFindQuery else {
+            showFindPanel(sender)
+            return
+        }
+        if !document.fileView.findPreviousMatch() {
+            NSSound.beep()
+        }
+        window.makeFirstResponder(document.fileView)
+    }
+
     func tabView(_ tabView: NSTabView, willClose tabViewItem: NSTabViewItem) {
         close(item: tabViewItem)
     }
@@ -2122,9 +2374,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         let mainMenu = NSMenu()
         let appMenuItem = NSMenuItem()
         let fileMenuItem = NSMenuItem()
+        let editMenuItem = NSMenuItem()
 
         mainMenu.addItem(appMenuItem)
         mainMenu.addItem(fileMenuItem)
+        mainMenu.addItem(editMenuItem)
 
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Quit Artisan", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -2138,6 +2392,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         let closeTabItem = fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeCurrentTab(_:)), keyEquivalent: "w")
         closeTabItem.target = self
         fileMenuItem.submenu = fileMenu
+
+        let editMenu = NSMenu(title: "Edit")
+        let findItem = editMenu.addItem(withTitle: "Find...", action: #selector(showFindPanel(_:)), keyEquivalent: "f")
+        findItem.target = self
+        let findNextItem = editMenu.addItem(withTitle: "Find Next", action: #selector(findNextResult(_:)), keyEquivalent: "g")
+        findNextItem.target = self
+        let findPreviousItem = editMenu.addItem(withTitle: "Find Previous", action: #selector(findPreviousResult(_:)), keyEquivalent: "g")
+        findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
+        findPreviousItem.target = self
+        editMenuItem.submenu = editMenu
 
         NSApp.mainMenu = mainMenu
     }
@@ -2831,6 +3095,51 @@ func runUndoRedoBenchmarkIfRequested() {
     }
 }
 
+func runFindBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-find"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        let buffer = try TextBuffer(path: path)
+        let fileView = FastFileView(buffer: buffer)
+        let failures = fileView.benchmarkFind()
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+
+        if args.indices.contains(modeIndex + 2) {
+            let largePath = URL(fileURLWithPath: args[modeIndex + 2]).standardizedFileURL.path
+            let largeBuffer = try TextBuffer(path: largePath)
+            let largeView = FastFileView(buffer: largeBuffer)
+            let start = DispatchTime.now().uptimeNanoseconds
+            let largeFailures = largeView.benchmarkLargeFind()
+            let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            if !largeFailures.isEmpty {
+                for failure in largeFailures {
+                    fputs("benchmark error: \(failure)\n", stderr)
+                }
+                exit(1)
+            }
+            print(String(format: "benchmark.find_large_ms=%.2f", elapsedMs))
+            print("benchmark.find_large=PASS")
+        }
+
+        print("benchmark.find=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -2839,6 +3148,7 @@ runKeyboardNavigationBenchmarkIfRequested()
 runSelectionModelBenchmarkIfRequested()
 runSelectionEditingBenchmarkIfRequested()
 runUndoRedoBenchmarkIfRequested()
+runFindBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()
