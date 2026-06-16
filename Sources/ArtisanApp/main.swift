@@ -18,9 +18,25 @@ struct HighlightSegment {
     let color: NSColor
 }
 
+enum EditorLanguage {
+    case plainText
+    case typeScript
+
+    static func detect(path: String) -> EditorLanguage {
+        let fileExtension = URL(fileURLWithPath: path).pathExtension.lowercased()
+        switch fileExtension {
+        case "ts", "tsx":
+            return .typeScript
+        default:
+            return .plainText
+        }
+    }
+}
+
 final class TextBuffer {
     let path: String
     let data: Data
+    private let language: EditorLanguage
     private(set) var lineStarts: [Int]
     private(set) var maxLineByteCount: Int
     private var fullyIndexed = false
@@ -31,6 +47,7 @@ final class TextBuffer {
 
     init(path: String) throws {
         self.path = path
+        self.language = EditorLanguage.detect(path: path)
         self.data = try Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
 
         var starts = [Int]()
@@ -100,6 +117,42 @@ final class TextBuffer {
         return (lineIndex, safeColumn + text.count)
     }
 
+    func insertText(_ text: String, atLine lineIndex: Int, column: Int) -> (line: Int, column: Int) {
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        guard normalized.contains("\n") else {
+            return insert(normalized, atLine: lineIndex, column: column)
+        }
+        guard lineIndex >= 0, lineIndex < lineStarts.count else { return (0, 0) }
+
+        let line = lineText(at: lineIndex)
+        let safeColumn = min(max(0, column), line.count)
+        let splitIndex = line.index(line.startIndex, offsetBy: safeColumn)
+        let prefix = String(line[..<splitIndex])
+        let suffix = String(line[splitIndex...])
+        let pastedLines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let firstPastedLine = pastedLines.first, let lastPastedLine = pastedLines.last else {
+            return (lineIndex, safeColumn)
+        }
+
+        updateLine(lineIndex, text: prefix + firstPastedLine)
+        let insertedLineCount = pastedLines.count - 1
+        for offset in 1...insertedLineCount {
+            lineStarts.insert(0, at: lineIndex + offset)
+        }
+        shiftSparseStateAfterLineInsertion(at: lineIndex + 1, count: insertedLineCount)
+
+        if insertedLineCount > 1 {
+            for offset in 1..<insertedLineCount {
+                updateLine(lineIndex + offset, text: pastedLines[offset])
+            }
+        }
+        updateLine(lineIndex + insertedLineCount, text: lastPastedLine + suffix)
+        highlightCache.removeAll(keepingCapacity: true)
+        return (lineIndex + insertedLineCount, lastPastedLine.count)
+    }
+
     func insertNewline(atLine lineIndex: Int, column: Int) -> (line: Int, column: Int) {
         guard lineIndex >= 0, lineIndex < lineStarts.count else { return (0, 0) }
         let line = lineText(at: lineIndex)
@@ -142,13 +195,44 @@ final class TextBuffer {
         return (lineIndex - 1, previous.count)
     }
 
+    func deleteForward(atLine lineIndex: Int, column: Int) -> (line: Int, column: Int) {
+        guard lineIndex >= 0, lineIndex < lineStarts.count else { return (0, 0) }
+        var line = lineText(at: lineIndex)
+        let safeColumn = min(max(0, column), line.count)
+        if safeColumn < line.count {
+            let start = line.index(line.startIndex, offsetBy: safeColumn)
+            let end = line.index(after: start)
+            line.removeSubrange(start..<end)
+            updateLine(lineIndex, text: line)
+            return (lineIndex, safeColumn)
+        }
+
+        guard lineIndex + 1 < lineStarts.count else {
+            return (lineIndex, safeColumn)
+        }
+
+        let next = lineText(at: lineIndex + 1)
+        updateLine(lineIndex, text: line + next)
+        lineStarts.remove(at: lineIndex + 1)
+        shiftSparseStateAfterLineRemoval(at: lineIndex + 1)
+        highlightCache.removeAll(keepingCapacity: true)
+        return (lineIndex, safeColumn)
+    }
+
     func highlightedSegments(at lineIndex: Int) -> [HighlightSegment] {
         let currentVersion = version(at: lineIndex)
         if let cached = highlightCache[lineIndex], cached.version == currentVersion {
             return cached.segments
         }
 
-        let segments = TypeScriptHighlighter.highlight(lineText(at: lineIndex))
+        let text = lineText(at: lineIndex)
+        let segments: [HighlightSegment]
+        switch language {
+        case .plainText:
+            segments = PlainTextHighlighter.highlight(text)
+        case .typeScript:
+            segments = TypeScriptHighlighter.highlight(text)
+        }
         highlightCache[lineIndex] = (currentVersion, segments)
         return segments
     }
@@ -215,12 +299,13 @@ final class TextBuffer {
         }
     }
 
-    private func shiftSparseStateAfterLineInsertion(at insertedIndex: Int) {
+    private func shiftSparseStateAfterLineInsertion(at insertedIndex: Int, count: Int = 1) {
+        guard count > 0 else { return }
         editedLines = Dictionary(uniqueKeysWithValues: editedLines.map { key, value in
-            (key >= insertedIndex ? key + 1 : key, value)
+            (key >= insertedIndex ? key + count : key, value)
         })
         lineVersions = Dictionary(uniqueKeysWithValues: lineVersions.map { key, value in
-            (key >= insertedIndex ? key + 1 : key, value)
+            (key >= insertedIndex ? key + count : key, value)
         })
     }
 
@@ -233,6 +318,14 @@ final class TextBuffer {
             if key == removedIndex { return nil }
             return (key > removedIndex ? key - 1 : key, value)
         })
+    }
+}
+
+enum PlainTextHighlighter {
+    private static let plain = NSColor.labelColor
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        [HighlightSegment(text: line, color: plain)]
     }
 }
 
@@ -440,6 +533,10 @@ final class FastFileView: NSView {
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) {
+            if event.charactersIgnoringModifiers?.lowercased() == "v" {
+                pasteFromClipboard()
+                return
+            }
             super.keyDown(with: event)
             return
         }
@@ -447,6 +544,8 @@ final class FastFileView: NSView {
         switch event.keyCode {
         case 51:
             applyEdit { buffer.deleteBackward(atLine: caretLine, column: caretColumn) }
+        case 117:
+            applyEdit { buffer.deleteForward(atLine: caretLine, column: caretColumn) }
         case 36, 76:
             applyEdit { buffer.insertNewline(atLine: caretLine, column: caretColumn) }
         case 123:
@@ -472,6 +571,13 @@ final class FastFileView: NSView {
                 super.keyDown(with: event)
             }
         }
+    }
+
+    private func pasteFromClipboard() {
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+            return
+        }
+        applyEdit { buffer.insertText(text, atLine: caretLine, column: caretColumn) }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -597,7 +703,7 @@ final class FastFileView: NSView {
         return (elapsedMS, lastRenderedNonEmptyLines, range, indexOnDrawCount, indexOnScrollCount)
     }
 
-    func benchmarkEditing(iterations: Int) -> (insertMS: Double, deleteMS: Double, newlineMS: Double, pasteMS: Double) {
+    func benchmarkEditing(iterations: Int) -> (insertMS: Double, deleteMS: Double, newlineMS: Double, pasteMS: Double, bottomEditMS: Double) {
         buffer.ensureFullyIndexed()
         resizeForBuffer()
         moveCaret(line: min(buffer.lineCount / 2, buffer.lineCount - 1), column: 8)
@@ -630,7 +736,15 @@ final class FastFileView: NSView {
         displayVisibleRect()
         let pasteMS = Double(DispatchTime.now().uptimeNanoseconds - pasteStart) / 1_000_000
 
-        return (insertMS, deleteMS, newlineMS, pasteMS)
+        moveCaret(line: max(0, buffer.lineCount - 1), column: 0)
+        displayVisibleRect()
+        let bottomEditStart = DispatchTime.now().uptimeNanoseconds
+        applyEdit { buffer.insert("z", atLine: caretLine, column: caretColumn) }
+        applyEdit { buffer.deleteBackward(atLine: caretLine, column: caretColumn) }
+        displayVisibleRect()
+        let bottomEditMS = Double(DispatchTime.now().uptimeNanoseconds - bottomEditStart) / 1_000_000
+
+        return (insertMS, deleteMS, newlineMS, pasteMS, bottomEditMS)
     }
 
     func benchmarkHighlighting(iterations: Int) -> Double {
@@ -717,11 +831,13 @@ final class TabDocument {
 final class PendingInvocation {
     let id: String
     let paths: Set<String>
+    var remainingPaths: Set<String>
     let fd: Int32
 
     init(id: String, paths: Set<String>, fd: Int32) {
         self.id = id
         self.paths = paths
+        self.remainingPaths = paths
         self.fd = fd
     }
 }
@@ -817,7 +933,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
     }
 
     private func configureWindow() {
-        window.title = "Artisan Prototype"
+        window.title = "Artisan"
+        window.isRestorable = false
         window.center()
         tabView.frame = window.contentView?.bounds ?? .zero
         tabView.autoresizingMask = [.width, .height]
@@ -834,13 +951,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
         mainMenu.addItem(fileMenuItem)
 
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit Artisan Prototype", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Artisan", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
 
         let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(withTitle: "Open...", action: #selector(openDocument(_:)), keyEquivalent: "o")
-        fileMenu.addItem(withTitle: "Save Disabled In Prototype", action: #selector(saveDocument(_:)), keyEquivalent: "s")
-        fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeCurrentTab(_:)), keyEquivalent: "w")
+        let openItem = fileMenu.addItem(withTitle: "Open...", action: #selector(openDocument(_:)), keyEquivalent: "o")
+        openItem.target = self
+        let saveItem = fileMenu.addItem(withTitle: "Save Disabled In Prototype", action: #selector(saveDocument(_:)), keyEquivalent: "s")
+        saveItem.target = self
+        let closeTabItem = fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeCurrentTab(_:)), keyEquivalent: "w")
+        closeTabItem.target = self
         fileMenuItem.submenu = fileMenu
 
         NSApp.mainMenu = mainMenu
@@ -888,7 +1008,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
                 documentsByItem[document.item] = document
                 tabView.addTabViewItem(document.item)
                 selectedDocument = document
-                fputs(String(format: "ArtisanPrototypeApp: opened %@ in %.2fms\n", path, elapsedMS), stderr)
+                fputs(String(format: "ArtisanApp: opened %@ in %.2fms\n", path, elapsedMS), stderr)
             } catch {
                 return OpenResponse(ok: false, message: "could not open \(path): \(error)")
             }
@@ -950,6 +1070,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
             print(String(format: "benchmark.newline_10_inserts_ms=%.2f", edit.newlineMS))
             print(String(format: "benchmark.newline_avg_insert_ms=%.4f", edit.newlineMS / 10))
             print(String(format: "benchmark.paste_1kb_ms=%.2f", edit.pasteMS))
+            print(String(format: "benchmark.bottom_insert_delete_ms=%.2f", edit.bottomEditMS))
             NSApp.terminate(nil)
         }
     }
@@ -980,17 +1101,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
         documentsByItem.removeValue(forKey: item)
         documentsByPath.removeValue(forKey: document.path)
 
-        for invocationID in document.waitingInvocations {
-            completeInvocationIfReady(invocationID)
+        let affectedInvocationIDs = Set(document.waitingInvocations).union(
+            pendingInvocations.values.compactMap { invocation in
+                invocation.remainingPaths.contains(document.path) ? invocation.id : nil
+            }
+        )
+
+        for invocationID in affectedInvocationIDs {
+            markClosed(path: document.path, for: invocationID)
         }
     }
 
-    private func completeInvocationIfReady(_ invocationID: String) {
+    private func markClosed(path: String, for invocationID: String) {
         guard let invocation = pendingInvocations[invocationID] else { return }
-        let stillOpen = documentsByPath.values.contains { document in
-            document.waitingInvocations.contains(invocationID)
-        }
-        guard !stillOpen else { return }
+        invocation.remainingPaths.remove(path)
+        guard invocation.remainingPaths.isEmpty else { return }
 
         pendingInvocations.removeValue(forKey: invocationID)
         send(OpenResponse(ok: true, message: "closed \(invocation.paths.count) file(s)"), to: invocation.fd, closeAfterWrite: true)
@@ -1004,7 +1129,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
                 Darwin.write(fd, buffer.baseAddress, 1)
             }
         } catch {
-            fputs("ArtisanPrototypeApp: failed to encode response: \(error)\n", stderr)
+            fputs("ArtisanApp: failed to encode response: \(error)\n", stderr)
         }
 
         if closeAfterWrite {
@@ -1014,7 +1139,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
 }
 
 final class SocketServer {
-    private let socketPath = "/tmp/artisan-prototype-\(getuid()).sock"
+    private let socketPath = "/tmp/artisan-\(getuid()).sock"
     private let queue = DispatchQueue(label: "artisan.prototype.socket")
     private var listenerFD: Int32 = -1
     private let handler: @Sendable (OpenRequest, Int32) -> Void
@@ -1114,6 +1239,88 @@ final class SocketServer {
         handler(request, fd)
     }
 }
+
+func runHighlightModeBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-highlight-mode"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        let buffer = try TextBuffer(path: path)
+        buffer.ensureFullyIndexed()
+
+        let sampleLines = min(buffer.lineCount, 1_000)
+        var totalSegments = 0
+        var multiSegmentLines = 0
+
+        for lineIndex in 0..<sampleLines {
+            let segments = buffer.highlightedSegments(at: lineIndex)
+            totalSegments += segments.count
+            if segments.count > 1 {
+                multiSegmentLines += 1
+            }
+        }
+
+        print("benchmark.highlight_sample_lines=\(sampleLines)")
+        print("benchmark.highlight_total_segments=\(totalSegments)")
+        print("benchmark.highlight_multi_segment_lines=\(multiSegmentLines)")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
+func runEditOperationsBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-edit-operations"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    func assertEqual(_ actual: String, _ expected: String, _ message: String) {
+        guard actual != expected else { return }
+        fputs("benchmark error: \(message): expected \(expected.debugDescription), got \(actual.debugDescription)\n", stderr)
+        exit(1)
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        let buffer = try TextBuffer(path: path)
+        var caret = buffer.insertText("!", atLine: 0, column: 5)
+        assertEqual(buffer.lineText(at: 0), "alpha!", "insert character")
+
+        caret = buffer.deleteBackward(atLine: caret.line, column: caret.column)
+        assertEqual(buffer.lineText(at: 0), "alpha", "backspace character")
+
+        caret = buffer.deleteForward(atLine: 1, column: 0)
+        assertEqual(buffer.lineText(at: 1), "ravo", "delete forward character")
+
+        caret = buffer.insertNewline(atLine: caret.line, column: 2)
+        assertEqual(buffer.lineText(at: 1), "ra", "newline prefix")
+        assertEqual(buffer.lineText(at: 2), "vo", "newline suffix")
+
+        caret = buffer.insertText("PASTE\nTEXT", atLine: caret.line, column: caret.column)
+        assertEqual(buffer.lineText(at: 2), "PASTE", "paste first line")
+        assertEqual(buffer.lineText(at: 3), "TEXTvo", "paste second line")
+
+        print("benchmark.edit_final_line=\(caret.line)")
+        print("benchmark.edit_final_column=\(caret.column)")
+        print("benchmark.edit_operations=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
+runHighlightModeBenchmarkIfRequested()
+runEditOperationsBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()

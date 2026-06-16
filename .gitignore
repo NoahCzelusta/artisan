@@ -31,3 +31,4 @@ dist/
 # Generated benchmark artifacts
 .scratch/benchmark-fixtures/
 .scratch/benchmark-results/
+.scratch/edit-fixtures/

@@ -26,18 +26,17 @@ The missing tool is a native macOS editor that starts almost instantly, opens sp
 
 ## Non-Goals
 
-- Replacing VS Code, Cursor, Xcode, or full IDEs.
-- Project or workspace management.
-- Folder sidebar or repository explorer.
-- Language servers.
-- Background indexing.
-- Extension/plugin system.
-- Integrated terminal.
-- Git integration.
-- AI/chat integration.
-- Creating new files from the editor or CLI.
-- Formatting in MVP.
-- Syntax highlighting in MVP.
+- No replacing VS Code, Cursor, Xcode, or full IDEs.
+- No project or workspace management.
+- No folder sidebar or repository explorer.
+- No language servers.
+- No project indexing.
+- No extensions or plugin system.
+- No integrated terminal.
+- No Git integration.
+- No AI/chat integration.
+- No creating new files from the editor or CLI.
+- No formatting in MVP.
 
 ## MVP Requirements
 
@@ -94,6 +93,35 @@ Requirements:
 - No command palette required for MVP.
 - No settings UI required for MVP beyond any minimal native preferences needed for retained low-risk preferences.
 
+### Keyboard Navigation and Selection
+
+- Arrow keys move by character and line.
+- `Option-Left` / `Option-Right` move by word.
+- `Command-Left` / `Command-Right` move to line boundaries.
+- `Command-Up` / `Command-Down` move to file boundaries.
+- Page Up / Page Down move by viewport.
+- Shift-modified navigation extends selection.
+- Mouse drag selects text.
+- Click moves the caret.
+- Double-click selects a word.
+- Selection supports copy, cut, delete, paste replacement, and typed replacement.
+- Undo and redo cover MVP edit operations.
+
+### Syntax Highlighting
+
+Artisan must provide viewport-bounded syntax highlighting for the MVP language coverage documented in `docs/syntax-highlighting.md`.
+
+Requirements:
+
+- Highlighting must not block file open.
+- Highlighting must not parse or highlight an entire large file on open.
+- Highlighting must not use language servers.
+- Highlighting must not index a project or workspace.
+- Unknown or expensive files must degrade safely to plain text.
+- TypeScript and JavaScript support are highest priority.
+- Markdown, JSON, YAML, and plain text support are MVP requirements.
+- Additional documented language groups may use lexical highlighters rather than semantic parsers.
+
 ### Performance
 
 - Cold launch to editable cursor: under 300ms.
@@ -106,10 +134,21 @@ Requirements:
 - 2 MB source/text files must open and edit smoothly.
 - 10 MB source/text files should open and scroll without beachballing.
 - Files larger than 10 MB may degrade gracefully.
+- Concrete benchmark gates are defined in `docs/benchmarks.md` and `benchmarks/targets.env`.
+
+### Benchmarks
+
+The MVP must keep a reproducible benchmark gate that can run locally.
+
+Requirements:
+
+- Benchmarks generate deterministic large fixtures locally.
+- Benchmarks measure real user paths, including CLI open, scrollbar-to-bottom, scrolling, navigation, editing, paste, and highlighting.
+- Benchmark artifacts are not committed.
+- The benchmark gate must pass before a feature issue is considered complete.
 
 ## Fast Follow
 
-- Syntax highlighting, only if it does not compromise startup or large-file performance.
 - Multiple themes or a small theme preference.
 - Font and font-size preferences.
 - Open recent files.

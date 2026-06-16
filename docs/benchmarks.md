@@ -12,10 +12,10 @@ scripts/run-benchmarks.sh
 
 The runner:
 
-- builds the release prototype
+- builds the release app
 - generates deterministic 10 MiB fixtures under `.scratch/benchmark-fixtures/`
 - runs the app benchmark mode against the TypeScript fixture
-- measures cold CLI launch/open through `artisan-proto`
+- measures cold CLI launch/open through `artisan`
 - checks results against `benchmarks/targets.env`
 
 Generated fixtures are intentionally ignored by git.
@@ -40,6 +40,7 @@ The machine-readable targets live in `benchmarks/targets.env`. The current produ
 | Delete average character | `<4 ms` |
 | Newline average insert | `<8 ms` |
 | 1 KiB paste | `<8 ms` |
+| Bottom-of-file insert + delete | `<12 ms` |
 
 These are user-path gates: they measure real scroll-view rendering and visible redraw work, not only editor-core state mutation. The non-blocking stretch target for repeated visible interactions remains `<2 ms` average where the implementation can achieve it without compromising correctness.
 
@@ -56,6 +57,7 @@ Benchmarks must cover user paths, not only convenient internal APIs:
 - delete/backspace
 - newline insert
 - paste
+- edit near the bottom of a 10 MiB file
 - viewport-bounded syntax highlighting
 
 The scrollbar benchmark must use the `NSScrollView` clip-view path. A benchmark that calls only a document-view helper is not sufficient.

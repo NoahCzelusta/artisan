@@ -8,11 +8,11 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "ArtisanPrototypeApp", targets: ["ArtisanPrototypeApp"]),
-        .executable(name: "artisan-proto", targets: ["artisan-proto"])
+        .executable(name: "ArtisanApp", targets: ["ArtisanApp"]),
+        .executable(name: "artisan", targets: ["artisan"])
     ],
     targets: [
-        .executableTarget(name: "ArtisanPrototypeApp"),
-        .executableTarget(name: "artisan-proto")
+        .executableTarget(name: "ArtisanApp"),
+        .executableTarget(name: "artisan")
     ]
 )

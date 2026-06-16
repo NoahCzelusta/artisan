@@ -12,10 +12,10 @@ struct OpenResponse: Codable {
     let message: String
 }
 
-let socketPath = "/tmp/artisan-prototype-\(getuid()).sock"
+let socketPath = "/tmp/artisan-\(getuid()).sock"
 
 func usage() -> Never {
-    fputs("usage: artisan-proto [--wait] <existing-file> [existing-file...]\n", stderr)
+    fputs("usage: artisan [--wait] <existing-file> [existing-file...]\n", stderr)
     exit(64)
 }
 
@@ -56,24 +56,45 @@ func connectToServer() -> Int32? {
 
 func launchServerIfNeeded() {
     guard let executableURL = Bundle.main.executableURL else {
-        fputs("artisan-proto: could not locate executable directory\n", stderr)
+        fputs("artisan: could not locate executable directory\n", stderr)
         exit(70)
     }
 
-    let appURL = executableURL.deletingLastPathComponent().appendingPathComponent("ArtisanPrototypeApp")
+    let executableDirectory = executableURL.deletingLastPathComponent()
+    let bundleURL = executableDirectory.appendingPathComponent("Artisan.app")
+    let bundleExecutableURL = bundleURL
+        .appendingPathComponent("Contents")
+        .appendingPathComponent("MacOS")
+        .appendingPathComponent("ArtisanApp")
+    if FileManager.default.isExecutableFile(atPath: bundleExecutableURL.path) {
+        launchDetached(
+            executableURL: bundleExecutableURL,
+            arguments: ["--server"]
+        )
+        return
+    }
+
+    let appURL = executableDirectory.appendingPathComponent("ArtisanApp")
     guard FileManager.default.isExecutableFile(atPath: appURL.path) else {
-        fputs("artisan-proto: expected app executable at \(appURL.path)\n", stderr)
+        fputs("artisan: expected app executable at \(appURL.path)\n", stderr)
         exit(69)
     }
 
+    launchDetached(executableURL: appURL, arguments: ["--server"])
+}
+
+func launchDetached(executableURL: URL, arguments: [String]) {
     let process = Process()
-    process.executableURL = appURL
-    process.arguments = ["--prototype-server"]
+    process.executableURL = executableURL
+    process.arguments = arguments
+    process.standardInput = FileHandle(forReadingAtPath: "/dev/null")
+    process.standardOutput = FileHandle(forWritingAtPath: "/dev/null")
+    process.standardError = FileHandle(forWritingAtPath: "/dev/null")
 
     do {
         try process.run()
     } catch {
-        fputs("artisan-proto: failed to launch prototype app: \(error)\n", stderr)
+        fputs("artisan: failed to launch app: \(error)\n", stderr)
         exit(70)
     }
 }
@@ -93,7 +114,7 @@ func connectWithRetry() -> Int32 {
         usleep(5_000)
     }
 
-    fputs("artisan-proto: timed out connecting to prototype app\n", stderr)
+    fputs("artisan: timed out connecting to app\n", stderr)
     exit(75)
 }
 
@@ -137,7 +158,7 @@ let paths = args.map { argument in
 for path in paths {
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-        fputs("artisan-proto: file does not exist: \(path)\n", stderr)
+        fputs("artisan: file does not exist: \(path)\n", stderr)
         exit(66)
     }
 }
@@ -153,7 +174,7 @@ do {
         Darwin.write(fd, buffer.baseAddress, 1)
     }
 } catch {
-    fputs("artisan-proto: failed to encode request: \(error)\n", stderr)
+    fputs("artisan: failed to encode request: \(error)\n", stderr)
     exit(70)
 }
 
@@ -161,12 +182,12 @@ guard let line = readLineFromFD(fd),
       let data = line.data(using: .utf8),
       let response = try? JSONDecoder().decode(OpenResponse.self, from: data)
 else {
-    fputs("artisan-proto: no response from prototype app\n", stderr)
+    fputs("artisan: no response from app\n", stderr)
     exit(75)
 }
 
 if !response.ok {
-    fputs("artisan-proto: \(response.message)\n", stderr)
+    fputs("artisan: \(response.message)\n", stderr)
     exit(1)
 }
 
@@ -175,12 +196,12 @@ if shouldWait {
           let finalData = finalLine.data(using: .utf8),
           let finalResponse = try? JSONDecoder().decode(OpenResponse.self, from: finalData)
     else {
-        fputs("artisan-proto: prototype app closed before wait completed\n", stderr)
+        fputs("artisan: app closed before wait completed\n", stderr)
         exit(1)
     }
 
     if !finalResponse.ok {
-        fputs("artisan-proto: \(finalResponse.message)\n", stderr)
+        fputs("artisan: \(finalResponse.message)\n", stderr)
         exit(1)
     }
 } else {

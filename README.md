@@ -31,6 +31,26 @@ Run the reproducible benchmark gate with:
 scripts/run-benchmarks.sh
 ```
 
+Build and open a file with the production CLI:
+
+```bash
+swift build -c release
+.build/release/artisan README.md
+```
+
+Build a local macOS app bundle and open a file directly:
+
+```bash
+scripts/build-artisan-app.sh
+open -n .build/release/Artisan.app --args "$PWD/README.md"
+```
+
+For a single local build/run entrypoint, use:
+
+```bash
+script/build_and_run.sh README.md
+```
+
 ## Documentation
 
 - [CONTEXT.md](CONTEXT.md) defines the product language.

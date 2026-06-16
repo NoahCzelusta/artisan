@@ -15,14 +15,14 @@ mkdir -p "$(dirname "$RESULTS_FILE")"
 cd "$ROOT_DIR"
 swift build -c release >/dev/null
 
-APP="$ROOT_DIR/.build/release/ArtisanPrototypeApp"
-CLI="$ROOT_DIR/.build/release/artisan-proto"
+APP="$ROOT_DIR/.build/release/ArtisanApp"
+CLI="$ROOT_DIR/.build/release/artisan"
 FIXTURE="$FIXTURE_DIR/large.ts"
 
 cleanup() {
-  pkill -f "$ROOT_DIR/.build/release/ArtisanPrototypeApp" >/dev/null 2>&1 || true
-  pkill -f "$ROOT_DIR/.build/release/artisan-proto" >/dev/null 2>&1 || true
-  rm -f "/tmp/artisan-prototype-$(id -u).sock"
+  pkill -f "$ROOT_DIR/.build/release/ArtisanApp" >/dev/null 2>&1 || true
+  pkill -f "$ROOT_DIR/.build/release/artisan" >/dev/null 2>&1 || true
+  rm -f "/tmp/artisan-$(id -u).sock"
 }
 
 cold_open_ms() {
@@ -30,29 +30,27 @@ cold_open_ms() {
   local start
   local end
   local pid
-  local ticks=0
+  local watchdog_pid
   stderr_file="$(mktemp)"
   start="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
   "$CLI" "$FIXTURE" >/dev/null 2>"$stderr_file" &
   pid="$!"
 
-  while kill -0 "$pid" >/dev/null 2>&1; do
-    if [[ "$ticks" -ge 50 ]]; then
-      kill "$pid" >/dev/null 2>&1 || true
-      cleanup
-      cat "$stderr_file" >&2 || true
-      rm -f "$stderr_file"
-      fail "cold CLI open timed out"
-    fi
-    sleep 0.1
-    ticks=$((ticks + 1))
-  done
+  (
+    sleep 5
+    kill "$pid" >/dev/null 2>&1 || true
+  ) &
+  watchdog_pid="$!"
 
   if ! wait "$pid"; then
+    kill "$watchdog_pid" >/dev/null 2>&1 || true
+    wait "$watchdog_pid" >/dev/null 2>&1 || true
     cat "$stderr_file" >&2 || true
     rm -f "$stderr_file"
     fail "cold CLI open failed"
   fi
+  kill "$watchdog_pid" >/dev/null 2>&1 || true
+  wait "$watchdog_pid" >/dev/null 2>&1 || true
 
   end="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
   rm -f "$stderr_file"
@@ -109,6 +107,7 @@ assert_lt benchmark.insert_avg_char_ms "$ARTISAN_BENCH_INSERT_AVG_CHAR_MS_MAX"
 assert_lt benchmark.delete_avg_char_ms "$ARTISAN_BENCH_DELETE_AVG_CHAR_MS_MAX"
 assert_lt benchmark.newline_avg_insert_ms "$ARTISAN_BENCH_NEWLINE_AVG_INSERT_MS_MAX"
 assert_lt benchmark.paste_1kb_ms "$ARTISAN_BENCH_PASTE_1KB_MS_MAX"
+assert_lt benchmark.bottom_insert_delete_ms "$ARTISAN_BENCH_BOTTOM_INSERT_DELETE_MS_MAX"
 
 # Warm the executable/page cache once, then measure controlled cold app launches.
 cleanup
