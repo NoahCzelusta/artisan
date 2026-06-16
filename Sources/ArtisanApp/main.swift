@@ -44,25 +44,151 @@ struct FileSnapshot: Equatable {
     }
 }
 
-enum EditorLanguage {
-    case plainText
-    case typeScript
+enum EditorLanguage: String, CaseIterable {
+    case plainText = "text"
+    case typeScript = "typescript"
+    case javaScript = "javascript"
+    case python = "python"
+    case java = "java"
+    case c = "c"
+    case cpp = "cpp"
+    case cSharp = "csharp"
+    case go = "go"
+    case rust = "rust"
+    case php = "php"
+    case ruby = "ruby"
+    case swift = "swift"
+    case kotlin = "kotlin"
+    case sql = "sql"
+    case html = "html"
+    case css = "css"
+    case shell = "shell"
+    case json = "json"
+    case yaml = "yaml"
+    case r = "r"
+    case markdown = "markdown"
+    case makefile = "makefile"
+    case dockerfile = "dockerfile"
+    case xml = "xml"
+    case toml = "toml"
 
-    static func detect(path: String) -> EditorLanguage {
-        let fileExtension = URL(fileURLWithPath: path).pathExtension.lowercased()
-        switch fileExtension {
-        case "ts", "tsx":
-            return .typeScript
-        default:
-            return .plainText
+    var id: String {
+        rawValue
+    }
+
+    static func detect(path: String, data: Data) -> EditorLanguage {
+        let url = URL(fileURLWithPath: path)
+        let filename = url.lastPathComponent.lowercased()
+
+        if let language = specialFilenameMap[filename] {
+            return language
         }
+        if filename.hasPrefix("dockerfile") {
+            return .dockerfile
+        }
+
+        let fileExtension = url.pathExtension.lowercased()
+        if let language = extensionMap[fileExtension] {
+            return language
+        }
+
+        if let language = detectShebang(in: data) {
+            return language
+        }
+
+        return .plainText
+    }
+
+    private static let specialFilenameMap: [String: EditorLanguage] = [
+        "makefile": .makefile,
+        "gnumakefile": .makefile,
+        "gemfile": .ruby,
+        "rakefile": .ruby,
+        ".bashrc": .shell,
+        ".zshrc": .shell
+    ]
+
+    private static let extensionMap: [String: EditorLanguage] = [
+        "ts": .typeScript,
+        "tsx": .typeScript,
+        "mts": .typeScript,
+        "cts": .typeScript,
+        "js": .javaScript,
+        "jsx": .javaScript,
+        "mjs": .javaScript,
+        "cjs": .javaScript,
+        "py": .python,
+        "pyi": .python,
+        "java": .java,
+        "c": .c,
+        "h": .c,
+        "cc": .cpp,
+        "cpp": .cpp,
+        "cxx": .cpp,
+        "hpp": .cpp,
+        "hh": .cpp,
+        "hxx": .cpp,
+        "cs": .cSharp,
+        "go": .go,
+        "rs": .rust,
+        "php": .php,
+        "phtml": .php,
+        "rb": .ruby,
+        "rake": .ruby,
+        "swift": .swift,
+        "kt": .kotlin,
+        "kts": .kotlin,
+        "sql": .sql,
+        "html": .html,
+        "htm": .html,
+        "css": .css,
+        "scss": .css,
+        "sass": .css,
+        "less": .css,
+        "sh": .shell,
+        "bash": .shell,
+        "zsh": .shell,
+        "fish": .shell,
+        "json": .json,
+        "jsonc": .json,
+        "yml": .yaml,
+        "yaml": .yaml,
+        "r": .r,
+        "md": .markdown,
+        "mdx": .markdown,
+        "markdown": .markdown,
+        "txt": .plainText,
+        "text": .plainText,
+        "xml": .xml,
+        "toml": .toml
+    ]
+
+    private static func detectShebang(in data: Data) -> EditorLanguage? {
+        guard data.starts(with: Data("#!".utf8)) else {
+            return nil
+        }
+        let prefix = data.prefix(256)
+        let line = String(decoding: prefix, as: UTF8.self)
+            .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            .first?
+            .lowercased() ?? ""
+
+        if line.contains("python") { return .python }
+        if line.contains("ruby") { return .ruby }
+        if line.contains("node") || line.contains("deno") { return .javaScript }
+        if line.contains("php") { return .php }
+        if line.contains("rscript") { return .r }
+        if line.contains("bash") || line.contains("zsh") || line.contains("fish") || line.contains("/sh") {
+            return .shell
+        }
+        return nil
     }
 }
 
 final class TextBuffer {
     let path: String
     private var data: Data
-    private let language: EditorLanguage
+    private var language: EditorLanguage
     private var originalLineEnding: String
     private var originalHadFinalNewline: Bool
     private var lastKnownDiskSnapshot: FileSnapshot
@@ -76,8 +202,8 @@ final class TextBuffer {
 
     init(path: String) throws {
         self.path = path
-        self.language = EditorLanguage.detect(path: path)
         self.data = try Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
+        self.language = EditorLanguage.detect(path: path, data: data)
         self.originalLineEnding = TextBuffer.detectLineEnding(in: data)
         self.originalHadFinalNewline = data.last == 10
         self.lastKnownDiskSnapshot = try FileSnapshot.read(path: path)
@@ -101,6 +227,10 @@ final class TextBuffer {
 
     var isFullyIndexed: Bool {
         fullyIndexed
+    }
+
+    var languageID: String {
+        language.id
     }
 
     func ensureFullyIndexed() {
@@ -371,6 +501,7 @@ final class TextBuffer {
 
     func reloadFromDisk() throws {
         data = try Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
+        language = EditorLanguage.detect(path: path, data: data)
         originalLineEnding = TextBuffer.detectLineEnding(in: data)
         originalHadFinalNewline = data.last == 10
         lastKnownDiskSnapshot = try FileSnapshot.read(path: path)
@@ -391,13 +522,7 @@ final class TextBuffer {
         }
 
         let text = lineText(at: lineIndex)
-        let segments: [HighlightSegment]
-        switch language {
-        case .plainText:
-            segments = PlainTextHighlighter.highlight(text)
-        case .typeScript:
-            segments = TypeScriptHighlighter.highlight(text)
-        }
+        let segments = HighlighterRegistry.highlight(text, as: language)
         highlightCache[lineIndex] = (currentVersion, segments)
         return segments
     }
@@ -539,7 +664,31 @@ final class TextBuffer {
     }
 }
 
-enum PlainTextHighlighter {
+protocol LineHighlighter {
+    static func highlight(_ line: String) -> [HighlightSegment]
+}
+
+enum HighlighterRegistry {
+    static func highlight(_ line: String, as language: EditorLanguage) -> [HighlightSegment] {
+        switch language {
+        case .typeScript, .javaScript:
+            return TypeScriptHighlighter.highlight(line)
+        default:
+            return PlainTextHighlighter.highlight(line)
+        }
+    }
+
+    static func usesDedicatedHighlighter(for language: EditorLanguage) -> Bool {
+        switch language {
+        case .typeScript, .javaScript:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+enum PlainTextHighlighter: LineHighlighter {
     private static let plain = NSColor.labelColor
 
     static func highlight(_ line: String) -> [HighlightSegment] {
@@ -547,7 +696,7 @@ enum PlainTextHighlighter {
     }
 }
 
-enum TypeScriptHighlighter {
+enum TypeScriptHighlighter: LineHighlighter {
     private static let keywords: Set<String> = [
         "abstract", "as", "async", "await", "break", "case", "catch", "class", "const",
         "continue", "debugger", "declare", "default", "delete", "do", "else", "enum",
@@ -3422,6 +3571,63 @@ func runNativeMenusBenchmarkIfRequested() {
     }
 }
 
+func runLanguageRegistryBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-language-registry"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let fixtureDirectory = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL
+    let expectations: [(name: String, languageID: String, dedicated: Bool)] = [
+        ("app.ts", "typescript", true),
+        ("app.jsx", "javascript", true),
+        ("README.md", "markdown", false),
+        ("config.yaml", "yaml", false),
+        ("Dockerfile", "dockerfile", false),
+        ("Makefile", "makefile", false),
+        ("script", "python", false),
+        ("unknown.artisanfixture", "text", false)
+    ]
+
+    do {
+        var failures: [String] = []
+        var highlightedLineCount = 0
+        for expectation in expectations {
+            let path = fixtureDirectory.appendingPathComponent(expectation.name).path
+            let buffer = try TextBuffer(path: path)
+            if buffer.languageID != expectation.languageID {
+                failures.append("\(expectation.name): expected \(expectation.languageID), got \(buffer.languageID)")
+            }
+            if let language = EditorLanguage(rawValue: buffer.languageID) {
+                let dedicated = HighlighterRegistry.usesDedicatedHighlighter(for: language)
+                if dedicated != expectation.dedicated {
+                    failures.append("\(expectation.name): expected dedicated=\(expectation.dedicated), got \(dedicated)")
+                }
+            } else {
+                failures.append("\(expectation.name): unknown language id \(buffer.languageID)")
+            }
+            _ = buffer.highlightedSegments(at: 0)
+            highlightedLineCount += 1
+        }
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.language_registry_known_count=\(expectations.count)")
+        print("benchmark.language_registry_highlighted_lines=\(highlightedLineCount)")
+        print("benchmark.language_registry=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -3432,6 +3638,7 @@ runSelectionEditingBenchmarkIfRequested()
 runUndoRedoBenchmarkIfRequested()
 runFindBenchmarkIfRequested()
 runNativeMenusBenchmarkIfRequested()
+runLanguageRegistryBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()

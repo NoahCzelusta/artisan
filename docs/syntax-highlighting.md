@@ -47,6 +47,14 @@ Use a language detector that maps file extension, filename, and shebang to a hig
 
 The editor core should keep syntax work disposable: if a line is not visible and not near the viewport, it does not need to be highlighted yet.
 
+## Registry Contract
+
+Language detection returns stable language ids such as `typescript`, `javascript`, `markdown`, `json`, `yaml`, `python`, `swift`, `shell`, and `text`. Extension and special-filename detection must not inspect parent directories, package manifests, git metadata, or project configuration.
+
+Unknown files use the `text` id and the plain-text highlighter. Known languages may also use the plain-text highlighter until their dedicated MVP highlighter lands; this keeps detection independent from grammar implementation.
+
+Shebang detection is limited to the first line and maps common script runtimes such as Python, Ruby, Node/Deno, PHP, Rscript, and POSIX shells.
+
 ## Deferred Work
 
 - Tree-sitter or parser-backed highlighting is not assumed. If introduced later, it must prove it can meet the benchmark targets without whole-file startup work.
