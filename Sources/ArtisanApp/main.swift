@@ -705,6 +705,22 @@ enum HighlighterRegistry {
             return JSONHighlighter.highlight(line)
         case .yaml:
             return YAMLHighlighter.highlight(line)
+        case .c:
+            return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.cKeywords)
+        case .cpp:
+            return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.cppKeywords)
+        case .cSharp:
+            return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.cSharpKeywords)
+        case .java:
+            return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.javaKeywords)
+        case .go:
+            return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.goKeywords)
+        case .rust:
+            return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.rustKeywords)
+        case .swift:
+            return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.swiftKeywords)
+        case .kotlin:
+            return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.kotlinKeywords)
         default:
             return PlainTextHighlighter.highlight(line)
         }
@@ -712,7 +728,8 @@ enum HighlighterRegistry {
 
     static func usesDedicatedHighlighter(for language: EditorLanguage) -> Bool {
         switch language {
-        case .typeScript, .javaScript, .markdown, .json, .yaml:
+        case .typeScript, .javaScript, .markdown, .json, .yaml,
+             .c, .cpp, .cSharp, .java, .go, .rust, .swift, .kotlin:
             return true
         default:
             return false
@@ -928,6 +945,112 @@ enum YAMLHighlighter: LineHighlighter {
         if afterColon < line.endIndex {
             segments.append(contentsOf: JSONHighlighter.lexValueLine(String(line[afterColon...]), allowComments: true))
         }
+        return segments
+    }
+}
+
+enum CLikeHighlighter {
+    static let cKeywords: Set<String> = ["auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum", "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void", "volatile", "while"]
+    static let cppKeywords = cKeywords.union(["alignas", "alignof", "and", "asm", "bool", "catch", "class", "concept", "constexpr", "consteval", "constinit", "delete", "explicit", "export", "false", "friend", "mutable", "namespace", "new", "noexcept", "nullptr", "operator", "or", "private", "protected", "public", "requires", "template", "this", "thread_local", "throw", "true", "try", "typename", "using", "virtual"])
+    static let cSharpKeywords: Set<String> = ["abstract", "as", "base", "bool", "break", "case", "catch", "class", "const", "decimal", "default", "delegate", "do", "else", "enum", "event", "false", "finally", "fixed", "for", "foreach", "if", "implicit", "in", "int", "interface", "internal", "is", "lock", "namespace", "new", "null", "object", "out", "override", "private", "protected", "public", "readonly", "ref", "return", "sealed", "static", "string", "struct", "switch", "this", "throw", "true", "try", "typeof", "using", "var", "virtual", "void", "while"]
+    static let javaKeywords: Set<String> = ["abstract", "assert", "boolean", "break", "case", "catch", "char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "false", "final", "finally", "float", "for", "if", "implements", "import", "instanceof", "int", "interface", "long", "native", "new", "null", "package", "private", "protected", "public", "return", "short", "static", "strictfp", "super", "switch", "synchronized", "this", "throw", "throws", "transient", "true", "try", "var", "void", "volatile", "while"]
+    static let goKeywords: Set<String> = ["break", "case", "chan", "const", "continue", "defer", "else", "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range", "return", "select", "struct", "switch", "type", "var"]
+    static let rustKeywords: Set<String> = ["as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while"]
+    static let swiftKeywords: Set<String> = ["as", "associatedtype", "break", "case", "catch", "class", "continue", "default", "defer", "deinit", "do", "else", "enum", "extension", "false", "fileprivate", "for", "func", "guard", "if", "import", "in", "init", "inout", "internal", "let", "nil", "open", "operator", "private", "protocol", "public", "repeat", "return", "self", "Self", "static", "struct", "subscript", "super", "switch", "throw", "throws", "true", "try", "typealias", "var", "where", "while"]
+    static let kotlinKeywords: Set<String> = ["as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface", "is", "null", "object", "package", "return", "super", "this", "throw", "true", "try", "typealias", "val", "var", "when", "while"]
+
+    private static let plain = NSColor.labelColor
+    private static let keyword = NSColor.systemBlue
+    private static let string = NSColor.systemRed
+    private static let number = NSColor.systemPurple
+    private static let comment = NSColor.systemGreen
+    private static let punctuation = NSColor.secondaryLabelColor
+
+    static func highlight(_ line: String, keywords: Set<String>) -> [HighlightSegment] {
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+
+        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor, _ kind: HighlightKind = .plain) {
+            guard start < end else { return }
+            segments.append(HighlightSegment(text: String(line[start..<end]), color: color, kind: kind))
+        }
+
+        while index < line.endIndex {
+            let char = line[index]
+            let next = line.index(after: index)
+
+            if char == "/", next < line.endIndex, line[next] == "/" {
+                append(index, line.endIndex, comment, .comment)
+                break
+            }
+
+            if char == "/", next < line.endIndex, line[next] == "*" {
+                var end = line.index(after: next)
+                while end < line.endIndex {
+                    let after = line.index(after: end)
+                    if line[end] == "*", after < line.endIndex, line[after] == "/" {
+                        end = line.index(after: after)
+                        break
+                    }
+                    end = after
+                }
+                append(index, end, comment, .comment)
+                index = end
+                continue
+            }
+
+            if char == "\"" || char == "'" {
+                let quote = char
+                var end = next
+                var escaped = false
+                while end < line.endIndex {
+                    let c = line[end]
+                    let after = line.index(after: end)
+                    if escaped {
+                        escaped = false
+                    } else if c == "\\" {
+                        escaped = true
+                    } else if c == quote {
+                        end = after
+                        break
+                    }
+                    end = after
+                }
+                append(index, end, string, .string)
+                index = end
+                continue
+            }
+
+            if char.isNumber {
+                var end = next
+                while end < line.endIndex, line[end].isNumber || line[end] == "." || line[end] == "_" {
+                    end = line.index(after: end)
+                }
+                append(index, end, number, .number)
+                index = end
+                continue
+            }
+
+            if char.isLetter || char == "_" {
+                var end = next
+                while end < line.endIndex, line[end].isLetter || line[end].isNumber || line[end] == "_" {
+                    end = line.index(after: end)
+                }
+                let word = String(line[index..<end])
+                append(index, end, keywords.contains(word) ? keyword : plain, keywords.contains(word) ? .keyword : .plain)
+                index = end
+                continue
+            }
+
+            if "{}[]().,:;+-*=<>!&|?/".contains(char) {
+                append(index, next, punctuation, .punctuation)
+            } else {
+                append(index, next, plain)
+            }
+            index = next
+        }
+
         return segments
     }
 }
@@ -4101,6 +4224,58 @@ func runDocDataHighlightingBenchmarkIfRequested() {
     }
 }
 
+func runCFamilyHighlightingBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-c-family-highlighting"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let fixtureDirectory = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL
+    let expectations: [(path: String, languageID: String)] = [
+        ("main.c", "c"),
+        ("main.cpp", "cpp"),
+        ("Main.cs", "csharp"),
+        ("Main.java", "java"),
+        ("main.go", "go"),
+        ("main.rs", "rust"),
+        ("main.swift", "swift"),
+        ("Main.kt", "kotlin")
+    ]
+
+    do {
+        var failures: [String] = []
+
+        for expectation in expectations {
+            let buffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent(expectation.path).path)
+            if buffer.languageID != expectation.languageID {
+                failures.append("\(expectation.path): expected \(expectation.languageID), got \(buffer.languageID)")
+            }
+            let line0Kinds = Set(buffer.highlightedSegments(at: 0).map(\.kind))
+            for kind in [HighlightKind.keyword, .number, .comment, .punctuation] where !line0Kinds.contains(kind) {
+                failures.append("\(expectation.path): first line missing \(kind.rawValue), got \(line0Kinds.map(\.rawValue).sorted())")
+            }
+            let line1Kinds = Set(buffer.highlightedSegments(at: 1).map(\.kind))
+            if !line1Kinds.contains(.string) {
+                failures.append("\(expectation.path): second line missing string, got \(line1Kinds.map(\.rawValue).sorted())")
+            }
+        }
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.c_family_highlighting=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -4114,6 +4289,7 @@ runNativeMenusBenchmarkIfRequested()
 runLanguageRegistryBenchmarkIfRequested()
 runTSJSHighlightingBenchmarkIfRequested()
 runDocDataHighlightingBenchmarkIfRequested()
+runCFamilyHighlightingBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()

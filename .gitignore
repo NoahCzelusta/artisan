@@ -31,6 +31,7 @@ dist/
 # Generated benchmark artifacts
 .scratch/benchmark-fixtures/
 .scratch/benchmark-results/
+.scratch/c-family-highlighting-fixtures/
 .scratch/disk-change-fixtures/
 .scratch/doc-data-highlighting-fixtures/
 .scratch/edit-fixtures/

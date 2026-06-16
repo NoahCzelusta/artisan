@@ -61,6 +61,7 @@ Shebang detection is limited to the first line and maps common script runtimes s
 - `markdown`: line-local headings, code fences, inline code, links, and emphasis.
 - `json`: line-local strings, object keys, numbers, booleans, nulls, punctuation, and JSONC line comments.
 - `yaml`: line-local comments, keys, quoted strings, numeric scalars, booleans, and punctuation.
+- `c`, `cpp`, `csharp`, `java`, `go`, `rust`, `swift`, and `kotlin`: shared line-local C-like lexer with per-language keyword sets, comments, strings, numbers, and punctuation.
 
 ## Deferred Work
 
