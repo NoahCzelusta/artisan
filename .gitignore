@@ -34,6 +34,7 @@ dist/
 .scratch/c-family-highlighting-fixtures/
 .scratch/disk-change-fixtures/
 .scratch/doc-data-highlighting-fixtures/
+.scratch/editor-core-fixtures/
 .scratch/edit-fixtures/
 .scratch/find-fixtures/
 .scratch/language-registry-fixtures/

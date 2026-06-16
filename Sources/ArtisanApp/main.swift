@@ -4773,6 +4773,66 @@ func runPreferencesBenchmarkIfRequested() {
     }
 }
 
+func runEditorCoreBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-editor-core"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        let buffer = try TextBuffer(path: path)
+        buffer.ensureFullyIndexed()
+        var failures: [String] = []
+
+        let originalLineCount = buffer.lineCount
+        let topOriginal = buffer.lineText(at: 0)
+        let middleLine = max(0, originalLineCount / 2)
+        let middleOriginal = buffer.lineText(at: middleLine)
+        let bottomLine = max(0, originalLineCount - 1)
+        let bottomOriginal = buffer.lineText(at: bottomLine)
+
+        _ = buffer.insert("TOP-", atLine: 0, column: 0)
+        _ = buffer.insert("-MID-", atLine: middleLine, column: min(5, middleOriginal.count))
+        _ = buffer.insert("-BOTTOM", atLine: bottomLine, column: bottomOriginal.count)
+
+        if buffer.lineText(at: 0) != "TOP-" + topOriginal {
+            failures.append("top edit did not apply")
+        }
+        if !buffer.lineText(at: middleLine).contains("-MID-") {
+            failures.append("middle edit did not apply")
+        }
+        if buffer.lineText(at: bottomLine) != bottomOriginal + "-BOTTOM" {
+            failures.append("bottom edit did not apply")
+        }
+        if buffer.lineCount != originalLineCount {
+            failures.append("single-line edits should not change line count")
+        }
+
+        _ = buffer.delete(in: (
+            start: TextPosition(line: 0, column: 0),
+            end: TextPosition(line: 0, column: 4)
+        ))
+        if buffer.lineText(at: 0) != topOriginal {
+            failures.append("top delete did not restore original")
+        }
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.editor_core=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -4789,6 +4849,7 @@ runDocDataHighlightingBenchmarkIfRequested()
 runCFamilyHighlightingBenchmarkIfRequested()
 runWebScriptingHighlightingBenchmarkIfRequested()
 runPreferencesBenchmarkIfRequested()
+runEditorCoreBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()
