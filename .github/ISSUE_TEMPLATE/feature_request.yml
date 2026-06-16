@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest a focused Artisan improvement
+title: "[Feature]: "
+labels: ["needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should Artisan do?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope boundaries
+      description: What should this avoid adding?
+      placeholder: "For example: no language server, no project indexing, no IDE features."
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

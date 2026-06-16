@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   package:
@@ -158,15 +159,20 @@ jobs:
             --verify-tag \
             --generate-notes
 
-      - name: Update same-repo Homebrew cask
+      - name: Open same-repo Homebrew cask PR
         if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           cp dist/artisan.rb /tmp/artisan.rb
+          branch="release/v${VERSION}-homebrew-cask"
+          title="Update Homebrew cask for v${VERSION}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main:refs/remotes/origin/main
-          git checkout -B main origin/main
+          git checkout -B "$branch" origin/main
 
           mkdir -p Casks
           cp /tmp/artisan.rb Casks/artisan.rb
@@ -177,8 +183,31 @@ jobs:
           fi
 
           git add Casks/artisan.rb
-          git commit -m "Update Homebrew cask for $GITHUB_REF_NAME"
-          git push origin main
+          git commit -m "$title"
+          git push --force-with-lease origin "$branch"
+
+          body="$(cat <<BODY
+          Updates the same-repo Homebrew cask for \`$GITHUB_REF_NAME\`.
+
+          Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME
+
+          This PR is opened by the release workflow so protected \`main\` can require PRs while keeping the cask update auditable.
+          BODY
+          )"
+
+          if gh pr view "$branch" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh pr edit "$branch" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$title" \
+              --body "$body"
+          else
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$branch" \
+              --title "$title" \
+              --body "$body"
+          fi
 
       - name: Delete temporary signing keychain
         if: always()

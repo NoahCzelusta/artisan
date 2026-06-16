@@ -13,17 +13,14 @@ Homebrew cask backed by GitHub Release assets.
 - `.github/workflows/ci.yml` runs functional gates and creates an uploadable
   release-package dry run on pull requests and pushes to `main`.
 - `.github/workflows/release.yml` packages tag builds, publishes GitHub Release
-  assets for `v*` tags, and writes the generated cask to `Casks/artisan.rb` on
-  `main`.
+  assets for `v*` tags, and opens a cask update PR for `Casks/artisan.rb`.
 - The current release app is a thin `arm64` bundle on this machine, not a
   universal binary.
-- If no Developer ID identity is provided, release packages are ad hoc signed
-  only. The first public `0.0.1` release uses that path so the team can test the
-  real Homebrew install flow before signing credentials are ready.
-- Fully trusted teammate downloads still require Developer ID signing plus
-  notarization.
-- The `0.0.1` Homebrew install path has been verified, but macOS rejects normal
-  launch while the installed app is quarantined and only ad hoc signed.
+- Tag releases in GitHub Actions use Developer ID signing, hardened runtime,
+  notarization, stapling, and Gatekeeper validation.
+- The `0.0.3` Homebrew install path has been verified end to end, including
+  `artisan README.md`, `stapler`, `spctl`, and `brew audit`.
+- The repository is public and uses the MIT License.
 
 ## Target Release Path
 
@@ -36,7 +33,8 @@ Homebrew cask backed by GitHub Release assets.
    hosted on GitHub Releases.
 5. Submit the archive with `notarytool`, staple the resulting ticket to the app
    with `stapler`, and validate the final artifact.
-6. Publish `Casks/artisan.rb` in this same public repository.
+6. Publish `Casks/artisan.rb` in this same public repository through a cask
+   update PR so protected `main` can require PRs.
 7. Consider the official `homebrew-cask` repository only after the project has a
    public homepage/release history and enough notability to pass audit review.
 
@@ -66,7 +64,8 @@ CI is configured through GitHub Actions:
 - `.github/workflows/release.yml` requires signing/notarization secrets,
   imports a Developer ID Application certificate into a temporary keychain,
   creates a temporary `artisan-ci` notary profile, packages the release, and
-  validates Gatekeeper acceptance before publishing assets.
+  validates Gatekeeper acceptance before publishing assets and opening the
+  cask update PR.
 - `scripts/run-benchmarks.sh` remains the local product performance gate with
   the aggressive benchmark targets in `benchmarks/targets.env`.
 
@@ -195,9 +194,9 @@ Homebrew Cask is feasible for Artisan because the Cask Cookbook supports:
 - `binary "artisan"` to link the CLI into `$(brew --prefix)/bin`.
 
 For release builds, `scripts/package-release.sh` generates `dist/artisan.rb`.
-The tag release workflow copies that exact file into `Casks/artisan.rb` on
-`main`, preserving the checksum of the uploaded archive. The first generated
-cask has this shape:
+The tag release workflow copies that exact file into `Casks/artisan.rb` on a
+release cask branch and opens a cask update PR, preserving the checksum of the
+uploaded archive. The generated cask has this shape:
 
 ```ruby
 cask "artisan" do
@@ -217,14 +216,14 @@ end
 ```
 
 This matches the current CLI assumption that the executable lives next to
-`Artisan.app` inside the staged artifact. After the workflow updates
-`Casks/artisan.rb`, the install path must be tested with:
+`Artisan.app` inside the staged artifact. After the cask update PR merges, the
+install path must be tested with:
 
 ```bash
 brew tap NoahCzelusta/artisan https://github.com/NoahCzelusta/artisan
 brew install --cask NoahCzelusta/artisan/artisan
 brew uninstall --cask NoahCzelusta/artisan/artisan
-brew audit --new --cask NoahCzelusta/artisan/artisan
+brew audit --cask NoahCzelusta/artisan/artisan
 ```
 
 After trusted signing is in place, the launch path must also be tested with:
@@ -234,12 +233,14 @@ artisan README.md
 artisan --wait README.md
 ```
 
-The `0.0.1` verification result is:
+The `0.0.3` verification result is:
 
 - `brew install --cask NoahCzelusta/artisan/artisan` succeeds.
 - `brew audit --cask NoahCzelusta/artisan/artisan` passes.
-- `spctl --assess --type execute /Applications/Artisan.app` rejects the app
-  because the build is not Developer ID signed/notarized.
+- `xcrun stapler validate /Applications/Artisan.app` passes.
+- `spctl --assess --type execute /Applications/Artisan.app` accepts the app as
+  a notarized Developer ID build.
+- `artisan README.md` opens the file through the installed Homebrew CLI.
 
 The official `homebrew-cask` repository should be a later step. Homebrew's
 acceptable casks guidance says low-notability casks may be rejected from the
@@ -256,17 +257,11 @@ To publish a release:
    cask.
 4. For tag pushes, the workflow creates a GitHub Release and uploads the release
    assets.
-5. The workflow commits the generated cask to `Casks/artisan.rb` on `main`.
+5. The workflow opens a cask update PR against `main`.
+6. After the cask PR passes CI and is reviewed, merge it.
+7. Run the Homebrew install proof from the public tap.
 
 ## Deferred Decisions
-
-License decision: deferred. The repo intentionally has no license file yet per
-the current project direction. Choose a license before any broader public
-announcement or official Homebrew Cask submission.
-
-GitHub signing secret provisioning: pending until the Developer ID `.p12`
-export, `.p12` password, and App Store Connect API key metadata are added as
-repository secrets.
 
 Universal binary support: deferred until Intel support matters for the team.
 

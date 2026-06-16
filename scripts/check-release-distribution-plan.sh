@@ -33,8 +33,8 @@ required_patterns=(
   "ARTISAN_NOTARY_API_KEY_BASE64"
   "dist/artisan.rb"
   "CI is configured"
-  "License decision: deferred"
-  "GitHub signing secret provisioning"
+  "MIT License"
+  "cask update PR"
 )
 
 for pattern in "${required_patterns[@]}"; do

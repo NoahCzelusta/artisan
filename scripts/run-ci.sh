@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 checks=(
   scripts/check-ci-workflows.sh
+  scripts/check-open-source-readiness.sh
   scripts/check-production-targets.sh
   scripts/check-release-distribution-plan.sh
   scripts/check-mvp-prd.sh

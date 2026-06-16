@@ -7,7 +7,7 @@ description: Cut signed and notarized Artisan macOS releases from this repositor
 
 ## Overview
 
-Use the repo's tag-driven release path. A `v*` tag triggers `.github/workflows/release.yml`, which signs, notarizes, staples, validates, publishes a GitHub Release, and commits the generated Homebrew cask to `Casks/artisan.rb` on `main`.
+Use the repo's tag-driven release path. A `v*` tag triggers `.github/workflows/release.yml`, which signs, notarizes, staples, validates, publishes a GitHub Release, and opens a generated Homebrew cask PR against `main`.
 
 ## Guardrails
 
@@ -60,16 +60,20 @@ gh run list --repo NoahCzelusta/artisan --workflow Release --limit 5
 gh run watch <run-id> --repo NoahCzelusta/artisan --exit-status
 ```
 
-The successful run must include signed artifact validation, GitHub Release publication, and same-repo cask update.
+The successful run must include signed artifact validation, GitHub Release publication, and same-repo cask PR creation.
 
-6. Pull the generated cask commit.
+6. Review and merge the generated cask PR.
 
 ```bash
+gh pr list --repo NoahCzelusta/artisan --search "Update Homebrew cask for vX.Y.Z in:title"
+gh pr view <pr-number> --repo NoahCzelusta/artisan --web
+gh pr checks <pr-number> --repo NoahCzelusta/artisan --watch
+gh pr merge <pr-number> --repo NoahCzelusta/artisan --squash --delete-branch
 git pull --ff-only
 sed -n '1,24p' Casks/artisan.rb
 ```
 
-Verify `Casks/artisan.rb` has the released version and sha256.
+Verify `Casks/artisan.rb` has the released version and sha256. If branch protection requires human approval and the agent cannot provide it, stop and ask the user to review or approve the cask PR.
 
 7. Inspect the GitHub Release.
 
@@ -121,7 +125,7 @@ brew developer off
 
 - Missing signing or notary secrets: fix GitHub Secrets, then rerun or cut a new patch release depending on whether artifacts were published.
 - Workflow failure before release publication: inspect logs with `gh run view <run-id> --log-failed`.
-- Cask update commit missing: confirm the run was triggered by a tag, not `workflow_dispatch`.
+- Cask update PR missing: confirm the run was triggered by a tag, not `workflow_dispatch`.
 - Homebrew installs an older version: run `brew update`, retap the repo, and inspect `Casks/artisan.rb`.
 - CLI cannot find `Artisan.app`: check `/opt/homebrew/bin/artisan` resolves into `/opt/homebrew/Caskroom/artisan/<version>/artisan` and rerun `scripts/check-cli-open-existing-files.sh`.
 
@@ -131,7 +135,7 @@ Report:
 
 - Released version and GitHub Release URL.
 - Release workflow run id and status.
-- Whether the generated cask commit was pulled.
+- Generated cask PR number and merge status.
 - Homebrew installed version.
 - Results of `artisan README.md`, `stapler`, `spctl`, and `brew audit`.
 - Any cleanup performed, such as quitting the app or turning Homebrew developer mode off.

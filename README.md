@@ -1,6 +1,6 @@
 # Artisan
 
-Artisan is a planned native macOS quick-edit code editor for developers who need a fast graphical editor during agent-assisted coding workflows.
+Artisan is a native macOS quick-edit code editor for developers who need a fast graphical editor during agent-assisted coding workflows.
 
 The goal is simple: open existing files from the command line, make focused edits, save, and close without the startup cost or scope of a full IDE.
 
@@ -91,17 +91,12 @@ brew tap NoahCzelusta/artisan https://github.com/NoahCzelusta/artisan
 brew install --cask NoahCzelusta/artisan/artisan
 ```
 
-After macOS trusts the installed app, launch files with:
+Release builds are Developer ID signed and notarized. Launch files with:
 
 ```bash
 artisan README.md
 artisan --wait README.md
 ```
-
-The first public cask is intentionally ad hoc signed while Developer ID signing
-and notarization remain deferred. Homebrew can install `0.0.1`, but Gatekeeper
-may reject launch until the app is Developer ID signed and notarized; see
-[docs/distribution.md](docs/distribution.md).
 
 ## Documentation
 
@@ -111,8 +106,15 @@ may reject launch until the app is Developer ID signed and notarized; see
 - [docs/distribution.md](docs/distribution.md) defines the release distribution path.
 - [docs/syntax-highlighting.md](docs/syntax-highlighting.md) defines the initial highlighting coverage plan.
 - [AGENTS.md](AGENTS.md) configures agent workflows for this repo.
+- [CONTRIBUTING.md](CONTRIBUTING.md) explains local setup, verification, and PR expectations.
+- [SECURITY.md](SECURITY.md) explains private vulnerability reporting.
 
 ## Status
 
 MVP implementation is underway. The repo contains the native app, CLI, local
-install path, benchmark gates, CI, and release-package dry runs.
+install path, benchmark gates, CI, signed/notarized release packaging, and a
+same-repo Homebrew cask.
+
+## License
+
+Artisan is released under the [MIT License](LICENSE).

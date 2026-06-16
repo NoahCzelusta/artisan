@@ -28,7 +28,10 @@ rg -q 'notarytool store-credentials artisan-ci' "$RELEASE" || fail "release work
 rg -q 'ARTISAN_NOTARY_KEYCHAIN' "$RELEASE" || fail "release workflow must pass the temporary notary keychain"
 rg -q 'spctl --assess' "$RELEASE" || fail "release workflow must validate Gatekeeper acceptance"
 rg -q 'gh release create' "$RELEASE" || fail "release workflow must create GitHub Releases for tags"
+rg -q 'pull-requests: write' "$RELEASE" || fail "release workflow must request pull request write permission"
 rg -q 'Casks/artisan\.rb' "$RELEASE" || fail "release workflow must update the same-repo Homebrew cask"
+rg -q 'gh pr create' "$RELEASE" || fail "release workflow must open a cask update PR"
+rg -q 'git push --force-with-lease origin "\$branch"' "$RELEASE" || fail "release workflow must update a cask PR branch"
 rg -q 'actions/upload-artifact@v6' "$RELEASE" || fail "release workflow must upload artifacts"
 
 echo "ci workflow check passed"

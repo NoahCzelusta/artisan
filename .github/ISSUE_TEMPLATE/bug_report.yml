@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible Artisan bug
+title: "[Bug]: "
+labels: ["needs-triage"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: List the exact steps, command, file type, and file size if relevant.
+      placeholder: |
+        1. Run artisan README.md
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Artisan version
+      placeholder: "0.0.3"
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "14.7, 15.5, 26.0"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant terminal output, logs, or screenshots.
+      render: shell
