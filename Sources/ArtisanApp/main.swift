@@ -37,6 +37,8 @@ final class TextBuffer {
     let path: String
     let data: Data
     private let language: EditorLanguage
+    private let originalLineEnding: String
+    private let originalHadFinalNewline: Bool
     private(set) var lineStarts: [Int]
     private(set) var maxLineByteCount: Int
     private var fullyIndexed = false
@@ -49,6 +51,8 @@ final class TextBuffer {
         self.path = path
         self.language = EditorLanguage.detect(path: path)
         self.data = try Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
+        self.originalLineEnding = TextBuffer.detectLineEnding(in: data)
+        self.originalHadFinalNewline = data.last == 10
 
         var starts = [Int]()
         starts.reserveCapacity(8192)
@@ -219,6 +223,21 @@ final class TextBuffer {
         return (lineIndex, safeColumn)
     }
 
+    func saveAtomically() throws {
+        let text = serializedText()
+        try Data(text.utf8).write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+
+    func serializedText() -> String {
+        ensureFullyIndexed()
+        let lines = (0..<lineCount).map { lineText(at: $0) }
+        var text = lines.joined(separator: originalLineEnding)
+        if originalHadFinalNewline, !text.hasSuffix(originalLineEnding) {
+            text += originalLineEnding
+        }
+        return text
+    }
+
     func highlightedSegments(at lineIndex: Int) -> [HighlightSegment] {
         let currentVersion = version(at: lineIndex)
         if let cached = highlightCache[lineIndex], cached.version == currentVersion {
@@ -318,6 +337,21 @@ final class TextBuffer {
             if key == removedIndex { return nil }
             return (key > removedIndex ? key - 1 : key, value)
         })
+    }
+
+    private static func detectLineEnding(in data: Data) -> String {
+        data.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                return "\n"
+            }
+            for index in 0..<data.count where base[index] == 10 {
+                if index > 0, base[index - 1] == 13 {
+                    return "\r\n"
+                }
+                return "\n"
+            }
+            return "\n"
+        }
     }
 }
 
@@ -456,6 +490,7 @@ final class FastFileView: NSView {
     private var caretLine = 0
     private var caretColumn = 0
     private var attributedLineCache: [Int: (version: Int, text: NSAttributedString)] = [:]
+    var onEdit: (() -> Void)?
     private(set) var drawCallCount = 0
     private(set) var indexOnDrawCount = 0
     private(set) var indexOnScrollCount = 0
@@ -624,11 +659,16 @@ final class FastFileView: NSView {
         let result = operation()
         caretLine = result.line
         caretColumn = result.column
+        onEdit?()
         attributedLineCache.removeValue(forKey: oldLine)
         attributedLineCache.removeValue(forKey: caretLine)
         resizeForBuffer()
         scrollLineToVisible(caretLine)
         markLinesDirty(oldLine, caretLine)
+    }
+
+    func save() throws {
+        try buffer.saveAtomically()
     }
 
     private func moveCaret(line: Int, column: Int) {
@@ -816,6 +856,7 @@ final class FastFileView: NSView {
 
 final class TabDocument {
     let path: String
+    let displayName: String
     let item: NSTabViewItem
     let fileView: FastFileView
     var waitingInvocations = Set<String>()
@@ -823,6 +864,7 @@ final class TabDocument {
 
     init(path: String, item: NSTabViewItem, fileView: FastFileView) {
         self.path = path
+        self.displayName = URL(fileURLWithPath: path).lastPathComponent
         self.item = item
         self.fileView = fileView
     }
@@ -843,7 +885,7 @@ final class PendingInvocation {
 }
 
 @MainActor
-final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
+final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, NSWindowDelegate {
     private let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
         styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -856,6 +898,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
     private var pendingInvocations: [String: PendingInvocation] = [:]
     private var socketServer: SocketServer?
     private var benchmarkPath: String?
+    private var isRunningBenchmark = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -900,6 +943,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
         true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if isRunningBenchmark {
+            return .terminateNow
+        }
+        return confirmCloseDirtyDocuments()
+            ? NSApplication.TerminateReply.terminateNow
+            : NSApplication.TerminateReply.terminateCancel
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         for invocation in pendingInvocations.values {
             send(OpenResponse(ok: true, message: "app quit"), to: invocation.fd, closeAfterWrite: true)
@@ -907,8 +959,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
         socketServer?.stop()
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        confirmCloseDirtyDocuments()
+    }
+
     @objc private func saveDocument(_ sender: Any?) {
-        NSSound.beep()
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        _ = save(document: document)
     }
 
     @objc private func openDocument(_ sender: Any?) {
@@ -935,6 +995,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
     private func configureWindow() {
         window.title = "Artisan"
         window.isRestorable = false
+        window.delegate = self
         window.center()
         tabView.frame = window.contentView?.bounds ?? .zero
         tabView.autoresizingMask = [.width, .height]
@@ -957,7 +1018,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
         let fileMenu = NSMenu(title: "File")
         let openItem = fileMenu.addItem(withTitle: "Open...", action: #selector(openDocument(_:)), keyEquivalent: "o")
         openItem.target = self
-        let saveItem = fileMenu.addItem(withTitle: "Save Disabled In Prototype", action: #selector(saveDocument(_:)), keyEquivalent: "s")
+        let saveItem = fileMenu.addItem(withTitle: "Save", action: #selector(saveDocument(_:)), keyEquivalent: "s")
         saveItem.target = self
         let closeTabItem = fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeCurrentTab(_:)), keyEquivalent: "w")
         closeTabItem.target = self
@@ -1025,6 +1086,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
     }
 
     private func runBenchmark(path: String) {
+        isRunningBenchmark = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
 
@@ -1088,14 +1150,80 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate {
         fileView.attach(to: scrollView)
 
         let item = NSTabViewItem(identifier: path)
-        item.label = URL(fileURLWithPath: path).lastPathComponent
         item.view = scrollView
 
-        return TabDocument(path: path, item: item, fileView: fileView)
+        let document = TabDocument(path: path, item: item, fileView: fileView)
+        updateTabLabel(document)
+        fileView.onEdit = { [weak self, weak document] in
+            guard let document else { return }
+            self?.markDirty(document)
+        }
+        return document
+    }
+
+    private func selectedDocument() -> TabDocument? {
+        guard let item = tabView.selectedTabViewItem else { return nil }
+        return documentsByItem[item]
+    }
+
+    private func markDirty(_ document: TabDocument) {
+        guard !document.isDirty else { return }
+        document.isDirty = true
+        updateTabLabel(document)
+    }
+
+    private func updateTabLabel(_ document: TabDocument) {
+        document.item.label = document.isDirty ? "\(document.displayName) *" : document.displayName
+    }
+
+    private func save(document: TabDocument) -> Bool {
+        do {
+            try document.fileView.save()
+            document.isDirty = false
+            updateTabLabel(document)
+            return true
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not save \(document.displayName)"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return false
+        }
+    }
+
+    private func confirmCloseDirtyDocuments() -> Bool {
+        for document in documentsByPath.values where document.isDirty {
+            guard confirmClose(document: document) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func confirmClose(document: TabDocument) -> Bool {
+        guard document.isDirty else { return true }
+
+        let alert = NSAlert()
+        alert.messageText = "Save changes to \(document.displayName)?"
+        alert.informativeText = "Your changes will be lost if you do not save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Cancel")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return save(document: document)
+        case .alertSecondButtonReturn:
+            return true
+        default:
+            return false
+        }
     }
 
     private func close(item: NSTabViewItem) {
         guard let document = documentsByItem[item] else { return }
+        guard confirmClose(document: document) else { return }
 
         tabView.removeTabViewItem(item)
         documentsByItem.removeValue(forKey: item)
@@ -1319,8 +1447,42 @@ func runEditOperationsBenchmarkIfRequested() {
     }
 }
 
+func runSaveOperationsBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-save-operations"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let directory = URL(fileURLWithPath: args[modeIndex + 1], isDirectory: true).standardizedFileURL
+    do {
+        let lfPath = directory.appendingPathComponent("lf-final.txt").path
+        let lfBuffer = try TextBuffer(path: lfPath)
+        _ = lfBuffer.insertText("!", atLine: 0, column: 5)
+        try lfBuffer.saveAtomically()
+
+        let crlfPath = directory.appendingPathComponent("crlf-final.txt").path
+        let crlfBuffer = try TextBuffer(path: crlfPath)
+        _ = crlfBuffer.insertText("!", atLine: 0, column: 3)
+        try crlfBuffer.saveAtomically()
+
+        let noFinalPath = directory.appendingPathComponent("no-final.txt").path
+        let noFinalBuffer = try TextBuffer(path: noFinalPath)
+        _ = noFinalBuffer.insertText("!", atLine: 0, column: 4)
+        try noFinalBuffer.saveAtomically()
+
+        print("benchmark.save_operations=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
+runSaveOperationsBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()

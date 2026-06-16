@@ -32,3 +32,4 @@ dist/
 .scratch/benchmark-fixtures/
 .scratch/benchmark-results/
 .scratch/edit-fixtures/
+.scratch/save-fixtures/
