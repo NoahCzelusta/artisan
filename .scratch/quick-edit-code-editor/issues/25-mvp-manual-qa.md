@@ -83,6 +83,9 @@ The MVP is verified through real user interactions, not only implementation assu
 - 2026-06-16: `scripts/run-benchmarks.sh` now includes the all-language highlighting gate instead of benchmarking only the TypeScript fixture for syntax performance.
 - 2026-06-16: Latest full scripted checks passed with the all-language gate included. `scripts/run-benchmarks.sh` passed with cold CLI open runs `190 206 202 210 222` ms; immediate bottom render was `10.43` ms, scroll averaged `5.5827` ms, and all 26 language ids passed with worst highlight average `0.0198` ms/line for TypeScript.
 - 2026-06-16: Added a production-target guard so `scripts/check-production-targets.sh` fails if `scripts/run-benchmarks.sh` stops invoking the all-language highlighting gate. Final focused re-run passed with cold CLI open runs `207 205 190 198 203` ms and worst all-language highlight average `0.0200` ms/line for TypeScript.
+- 2026-06-16: Added regression coverage for Makefile, Dockerfile, XML, and TOML dedicated highlighting via `scripts/check-build-config-highlighting.sh`.
+- 2026-06-16: Added regression coverage for long-line horizontal caret reveal, click placement after horizontal scroll, and current-line highlight coverage via `scripts/check-horizontal-caret-visibility.sh`.
+- 2026-06-16: Latest benchmark gate passed after these regressions with cold CLI open runs `188 207 197 224 205` ms; all 26 language ids passed with worst highlight average `0.0200` ms/line for TypeScript. Computer Use visually confirmed Makefile, Dockerfile, XML, TOML, and long-line TypeScript tabs; direct Computer Use actions were blocked, so Command-Right/click input used macOS System Events with Computer Use screenshots for verification.
 
 ### Human QA checklist
 
@@ -93,9 +96,12 @@ The MVP is verified through real user interactions, not only implementation assu
 - [ ] Open a large TypeScript fixture and immediately drag the scrollbar to the bottom; confirm lines render without freezing.
 - [ ] Scroll with trackpad or mouse wheel; confirm smooth incremental rendering.
 - [ ] Click into the editor before and after scrolling; confirm caret placement works.
+- [ ] Open a long single-line TypeScript file; press Command-Right and confirm the horizontal viewport scrolls so the caret remains visible.
+- [ ] Horizontally scroll a long line, click in the editor, and confirm the caret appears at the clicked position.
+- [ ] Horizontally scroll a long line and confirm the current-line highlight remains visible across the scrolled viewport.
 - [ ] Exercise Option-arrow, Command-arrow, Shift-arrow, Shift-Option-arrow, and Shift-Command-arrow selection/navigation.
 - [ ] Copy, cut, paste, undo, and redo selected text.
 - [ ] Use find in the current file, including a match near the bottom of a large file.
 - [ ] Modify the same file externally while dirty in Artisan; confirm the disk-change protection appears before saving.
-- [ ] Open TypeScript, Markdown, JSON, YAML, C/C++, Swift, Python, Ruby, Go, Rust, Java, Kotlin, shell, SQL, HTML/CSS, PHP, Lua, TOML, and plain text samples; confirm highlighting is acceptable and unsupported files fail clearly.
+- [ ] Open TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP, Ruby, Swift, Kotlin, SQL, HTML, CSS, shell, JSON, YAML, R, Markdown, Makefile, Dockerfile, XML, TOML, and plain text samples; confirm highlighting is acceptable and unsupported files fall back to plain text.
 - [ ] Run `scripts/uninstall-local.sh`; confirm app and CLI artifacts are removed.

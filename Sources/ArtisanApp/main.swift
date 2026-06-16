@@ -768,6 +768,14 @@ enum HighlighterRegistry {
             return HTMLHighlighter.highlight(line)
         case .css:
             return CSSHighlighter.highlight(line)
+        case .makefile:
+            return MakefileHighlighter.highlight(line)
+        case .dockerfile:
+            return DockerfileHighlighter.highlight(line)
+        case .xml:
+            return XMLHighlighter.highlight(line)
+        case .toml:
+            return TOMLHighlighter.highlight(line)
         default:
             return PlainTextHighlighter.highlight(line)
         }
@@ -779,6 +787,8 @@ enum HighlighterRegistry {
              .c, .cpp, .cSharp, .java, .go, .rust, .swift, .kotlin:
             return true
         case .python, .ruby, .php, .shell, .r, .sql, .html, .css:
+            return true
+        case .makefile, .dockerfile, .xml, .toml:
             return true
         default:
             return false
@@ -1373,6 +1383,300 @@ enum CSSHighlighter: LineHighlighter {
     }
 }
 
+enum MakefileHighlighter: LineHighlighter {
+    private static let plain = NSColor.labelColor
+    private static let key = NSColor.systemBlue
+    private static let keyword = NSColor.systemBlue
+    private static let comment = NSColor.systemGreen
+    private static let punctuation = NSColor.secondaryLabelColor
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        if line.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+            return [HighlightSegment(text: line, color: comment, kind: .comment)]
+        }
+
+        if line.first == "\t" {
+            return highlightRecipe(line)
+        }
+
+        if let colon = line.firstIndex(of: ":"), shouldTreatAsTarget(line, colon: colon) {
+            return splitKeyValue(line, separator: colon)
+        }
+
+        if let assignment = assignmentSeparator(in: line) {
+            return splitKeyValue(line, separator: assignment)
+        }
+
+        return ShellValueHighlighter.highlight(line)
+    }
+
+    private static func highlightRecipe(_ line: String) -> [HighlightSegment] {
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+
+        while index < line.endIndex, line[index].isWhitespace {
+            let next = line.index(after: index)
+            segments.append(HighlightSegment(text: String(line[index..<next]), color: plain))
+            index = next
+        }
+
+        if index < line.endIndex {
+            var end = line.index(after: index)
+            while end < line.endIndex, isIdentifierCharacter(line[end]) {
+                end = line.index(after: end)
+            }
+            if index < end {
+                segments.append(HighlightSegment(text: String(line[index..<end]), color: keyword, kind: .keyword))
+                index = end
+            }
+        }
+
+        if index < line.endIndex {
+            segments.append(contentsOf: ShellValueHighlighter.highlight(String(line[index...])))
+        }
+        return segments
+    }
+
+    private static func splitKeyValue(_ line: String, separator: String.Index) -> [HighlightSegment] {
+        var segments: [HighlightSegment] = []
+        if line.startIndex < separator {
+            segments.append(HighlightSegment(text: String(line[line.startIndex..<separator]), color: key, kind: .key))
+        }
+        let afterSeparator = line.index(after: separator)
+        segments.append(HighlightSegment(text: String(line[separator..<afterSeparator]), color: punctuation, kind: .punctuation))
+        if afterSeparator < line.endIndex {
+            segments.append(contentsOf: ShellValueHighlighter.highlight(String(line[afterSeparator...])))
+        }
+        return segments
+    }
+
+    private static func shouldTreatAsTarget(_ line: String, colon: String.Index) -> Bool {
+        let prefix = line[line.startIndex..<colon]
+        return !prefix.isEmpty && !prefix.contains("=")
+    }
+
+    private static func assignmentSeparator(in line: String) -> String.Index? {
+        var index = line.startIndex
+        while index < line.endIndex {
+            let char = line[index]
+            if char == "=" {
+                return index
+            }
+            if char == ":" {
+                let next = line.index(after: index)
+                if next < line.endIndex, line[next] == "=" {
+                    return index
+                }
+            }
+            if char == "+" || char == "?" {
+                let next = line.index(after: index)
+                if next < line.endIndex, line[next] == "=" {
+                    return index
+                }
+            }
+            index = line.index(after: index)
+        }
+        return nil
+    }
+
+    private static func isIdentifierCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_" || character == "-" || character == "." || character == "/"
+    }
+}
+
+enum DockerfileHighlighter: LineHighlighter {
+    private static let plain = NSColor.labelColor
+    private static let keyword = NSColor.systemBlue
+    private static let comment = NSColor.systemGreen
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        if line.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+            return [HighlightSegment(text: line, color: comment, kind: .comment)]
+        }
+
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+        while index < line.endIndex, line[index].isWhitespace {
+            let next = line.index(after: index)
+            segments.append(HighlightSegment(text: String(line[index..<next]), color: plain))
+            index = next
+        }
+
+        if index < line.endIndex {
+            var end = line.index(after: index)
+            while end < line.endIndex, line[end].isLetter || line[end] == "_" {
+                end = line.index(after: end)
+            }
+            segments.append(HighlightSegment(text: String(line[index..<end]), color: keyword, kind: .keyword))
+            index = end
+        }
+
+        if index < line.endIndex {
+            segments.append(contentsOf: ShellValueHighlighter.highlight(String(line[index...])))
+        }
+        return segments
+    }
+}
+
+enum XMLHighlighter: LineHighlighter {
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        HTMLHighlighter.highlight(line)
+    }
+}
+
+enum TOMLHighlighter: LineHighlighter {
+    private static let plain = NSColor.labelColor
+    private static let key = NSColor.systemBlue
+    private static let tag = NSColor.systemTeal
+    private static let string = NSColor.systemRed
+    private static let number = NSColor.systemPurple
+    private static let boolean = NSColor.systemOrange
+    private static let comment = NSColor.systemGreen
+    private static let punctuation = NSColor.secondaryLabelColor
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("#") {
+            return [HighlightSegment(text: line, color: comment, kind: .comment)]
+        }
+
+        let firstNonWhitespace = line.firstIndex { !$0.isWhitespace } ?? line.startIndex
+        if firstNonWhitespace < line.endIndex, line[firstNonWhitespace] == "[" {
+            return highlightSection(line, from: firstNonWhitespace)
+        }
+
+        guard let equals = line.firstIndex(of: "=") else {
+            return highlightValue(line)
+        }
+
+        var segments: [HighlightSegment] = []
+        if line.startIndex < equals {
+            segments.append(HighlightSegment(text: String(line[line.startIndex..<equals]), color: key, kind: .key))
+        }
+        let afterEquals = line.index(after: equals)
+        segments.append(HighlightSegment(text: "=", color: punctuation, kind: .punctuation))
+        if afterEquals < line.endIndex {
+            segments.append(contentsOf: highlightValue(String(line[afterEquals...])))
+        }
+        return segments
+    }
+
+    private static func highlightSection(_ line: String, from start: String.Index) -> [HighlightSegment] {
+        var segments: [HighlightSegment] = []
+        if line.startIndex < start {
+            segments.append(HighlightSegment(text: String(line[line.startIndex..<start]), color: plain))
+        }
+        var index = start
+        while index < line.endIndex {
+            let next = line.index(after: index)
+            let char = line[index]
+            if char == "[" || char == "]" || char == "." {
+                segments.append(HighlightSegment(text: String(line[index..<next]), color: punctuation, kind: .punctuation))
+            } else if char == "#" {
+                segments.append(HighlightSegment(text: String(line[index..<line.endIndex]), color: comment, kind: .comment))
+                break
+            } else if char.isLetter || char.isNumber || char == "_" || char == "-" {
+                var end = next
+                while end < line.endIndex, line[end].isLetter || line[end].isNumber || line[end] == "_" || line[end] == "-" {
+                    end = line.index(after: end)
+                }
+                segments.append(HighlightSegment(text: String(line[index..<end]), color: tag, kind: .tag))
+                index = end
+                continue
+            } else {
+                segments.append(HighlightSegment(text: String(line[index..<next]), color: plain))
+            }
+            index = next
+        }
+        return segments
+    }
+
+    private static func highlightValue(_ line: String) -> [HighlightSegment] {
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+
+        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor, _ kind: HighlightKind = .plain) {
+            guard start < end else { return }
+            segments.append(HighlightSegment(text: String(line[start..<end]), color: color, kind: kind))
+        }
+
+        while index < line.endIndex {
+            let char = line[index]
+            let next = line.index(after: index)
+
+            if char == "#" {
+                append(index, line.endIndex, comment, .comment)
+                break
+            }
+
+            if char == "\"" || char == "'" {
+                let quote = char
+                var end = next
+                var escaped = false
+                while end < line.endIndex {
+                    let current = line[end]
+                    let after = line.index(after: end)
+                    if escaped {
+                        escaped = false
+                    } else if current == "\\" {
+                        escaped = true
+                    } else if current == quote {
+                        end = after
+                        break
+                    }
+                    end = after
+                }
+                append(index, end, string, .string)
+                index = end
+                continue
+            }
+
+            if char.isNumber || char == "-" {
+                var end = next
+                while end < line.endIndex, line[end].isNumber || line[end] == "." || line[end] == "_" || line[end] == "e" || line[end] == "E" || line[end] == "+" || line[end] == "-" {
+                    end = line.index(after: end)
+                }
+                append(index, end, number, .number)
+                index = end
+                continue
+            }
+
+            if char.isLetter {
+                var end = next
+                while end < line.endIndex, line[end].isLetter || line[end].isNumber || line[end] == "_" || line[end] == "-" {
+                    end = line.index(after: end)
+                }
+                let word = String(line[index..<end])
+                if word == "true" || word == "false" {
+                    append(index, end, boolean, .boolean)
+                } else {
+                    append(index, end, plain, .scalar)
+                }
+                index = end
+                continue
+            }
+
+            if "[]{}=,.".contains(char) {
+                append(index, next, punctuation, .punctuation)
+            } else {
+                append(index, next, plain)
+            }
+            index = next
+        }
+
+        return segments
+    }
+}
+
+enum ShellValueHighlighter {
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        ScriptHighlighter.highlight(line, keywords: [])
+    }
+}
+
 enum TypeScriptHighlighter: LineHighlighter {
     private static let keywords: Set<String> = [
         "abstract", "as", "async", "await", "break", "case", "catch", "class", "const",
@@ -1644,6 +1948,7 @@ final class FastFileView: NSView {
     private var charWidth: CGFloat
     private var gutterWidth: CGFloat
     private let horizontalPadding: CGFloat = 12
+    private static let maxLayoutColumns = 20_000
     private var caretLine = 0
     private var caretColumn = 0
     private var selectionAnchor: TextPosition?
@@ -1671,7 +1976,7 @@ final class FastFileView: NSView {
         let digits = max(2, String(buffer.lineCount).count)
         self.gutterWidth = CGFloat(digits) * max(1, "8".size(withAttributes: [.font: lineNumberFont]).width) + 18
 
-        let width = gutterWidth + horizontalPadding * 2 + CGFloat(min(buffer.maxLineByteCount, 4_000)) * charWidth
+        let width = gutterWidth + horizontalPadding * 2 + CGFloat(min(buffer.maxLineByteCount, Self.maxLayoutColumns)) * charWidth
         let height = CGFloat(buffer.lineCount) * lineHeight
         super.init(frame: NSRect(x: 0, y: 0, width: max(900, width), height: max(700, height)))
         wantsLayer = true
@@ -1712,7 +2017,7 @@ final class FastFileView: NSView {
             let y = CGFloat(line) * lineHeight
             if line == caretLine {
                 NSColor.selectedTextBackgroundColor.withAlphaComponent(0.22).setFill()
-                NSRect(x: 0, y: y, width: visibleRect.width, height: lineHeight).fill()
+                currentLineHighlightRect(in: visibleRect).fill()
             }
             drawFindHighlights(onLine: line, atY: y)
             drawSelectionBackground(onLine: line, atY: y)
@@ -1728,10 +2033,10 @@ final class FastFileView: NSView {
         }
 
         let caretY = CGFloat(caretLine) * lineHeight
-        if visibleRect.intersects(NSRect(x: 0, y: caretY, width: 1, height: lineHeight)) {
+        let caret = caretRect()
+        if visibleRect.intersects(caret) {
             caretColor.setFill()
-            let caretX = gutterWidth + horizontalPadding + CGFloat(caretColumn) * charWidth
-            NSRect(x: caretX, y: caretY + 2, width: 2, height: lineHeight - 4).fill()
+            NSRect(x: caret.minX, y: caretY + 2, width: caret.width, height: lineHeight - 4).fill()
         }
     }
 
@@ -1893,6 +2198,24 @@ final class FastFileView: NSView {
         let startX = gutterWidth + horizontalPadding + CGFloat(columns.start) * charWidth
         let width = max(2, CGFloat(columns.end - columns.start) * charWidth)
         NSRect(x: startX, y: y + 1, width: width, height: lineHeight - 2).fill()
+    }
+
+    private func caretRect() -> NSRect {
+        NSRect(
+            x: gutterWidth + horizontalPadding + CGFloat(caretColumn) * charWidth,
+            y: CGFloat(caretLine) * lineHeight,
+            width: 2,
+            height: lineHeight
+        )
+    }
+
+    private func currentLineHighlightRect(in visibleRect: NSRect) -> NSRect {
+        NSRect(
+            x: visibleRect.minX,
+            y: CGFloat(caretLine) * lineHeight,
+            width: visibleRect.width,
+            height: lineHeight
+        )
     }
 
     private func drawFindHighlights(onLine line: Int, atY y: CGFloat) {
@@ -2057,7 +2380,7 @@ final class FastFileView: NSView {
             anchor: TextPosition(line: match.line, column: match.startColumn),
             active: TextPosition(line: match.line, column: match.endColumn)
         )
-        scrollLineToVisible(match.line)
+        scrollCaretToVisible()
         setNeedsDisplay(enclosingScrollView?.contentView.bounds ?? bounds)
     }
 
@@ -2414,7 +2737,7 @@ final class FastFileView: NSView {
             attributedLineCache.removeValue(forKey: caretLine)
         }
         resizeForBuffer()
-        scrollLineToVisible(caretLine)
+        scrollCaretToVisible()
         if hadSelection {
             setNeedsDisplay(bounds)
         } else {
@@ -2453,7 +2776,7 @@ final class FastFileView: NSView {
         }
         attributedLineCache.removeAll(keepingCapacity: true)
         resizeForBuffer()
-        scrollLineToVisible(caretLine)
+        scrollCaretToVisible()
         setNeedsDisplay(bounds)
         markLinesDirty(oldLine, caretLine)
         onEdit?()
@@ -2509,7 +2832,7 @@ final class FastFileView: NSView {
         } else {
             clearSelection()
         }
-        scrollLineToVisible(caretLine)
+        scrollCaretToVisible()
         markLinesDirty(oldLine, caretLine)
         if extending || hadSelection || selectionAnchor != nil {
             setNeedsDisplay(enclosingScrollView?.contentView.bounds ?? bounds)
@@ -2682,6 +3005,76 @@ final class FastFileView: NSView {
 
         movePageUp()
         expect("page up clamps to file start line", line: 0, column: 0)
+
+        return failures
+    }
+
+    func benchmarkHorizontalCaretVisibility(viewport: NSSize) -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+
+        let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: viewport))
+        scrollView.contentView = EditorClipView(frame: scrollView.contentView.frame)
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.documentView = self
+        attach(to: scrollView)
+        resizeForBuffer()
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        var failures: [String] = []
+        let firstLineLength = buffer.lineText(at: 0).count
+        if firstLineLength < 120 {
+            failures.append("fixture first line must be long enough to exceed the initial viewport, got \(firstLineLength) columns")
+        }
+        if bounds.width <= scrollView.contentView.bounds.width {
+            failures.append("document view must be wider than viewport for horizontal caret benchmark")
+        }
+
+        func keyEvent(flags: NSEvent.ModifierFlags, keyCode: UInt16) -> NSEvent {
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: flags,
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: "",
+                charactersIgnoringModifiers: "",
+                isARepeat: false,
+                keyCode: keyCode
+            )!
+        }
+
+        func caretIsVisible(in visible: NSRect) -> Bool {
+            visible.insetBy(dx: -4, dy: -2).intersects(caretRect())
+        }
+
+        moveCaret(line: 0, column: 0)
+        let initialVisible = scrollView.contentView.bounds
+        keyDown(with: keyEvent(flags: .command, keyCode: 124))
+        let afterCommandRight = scrollView.contentView.bounds
+        if caretColumn != firstLineLength {
+            failures.append("command-right should move caret to line end \(firstLineLength), got \(caretColumn)")
+        }
+        if afterCommandRight.minX <= initialVisible.minX {
+            failures.append("command-right should scroll horizontally when line end is offscreen")
+        }
+        if !caretIsVisible(in: afterCommandRight) {
+            failures.append("caret should be visible after command-right; visible=\(NSStringFromRect(afterCommandRight)) caret=\(NSStringFromRect(caretRect()))")
+        }
+
+        let highlight = currentLineHighlightRect(in: afterCommandRight)
+        if highlight.minX > afterCommandRight.minX || highlight.maxX < afterCommandRight.maxX {
+            failures.append("current-line highlight should cover the horizontal viewport; visible=\(NSStringFromRect(afterCommandRight)) highlight=\(NSStringFromRect(highlight))")
+        }
+
+        let clickColumn = Int(round((afterCommandRight.midX - gutterWidth - horizontalPadding) / charWidth))
+        moveCaret(line: 0, column: clickColumn)
+        if !caretIsVisible(in: scrollView.contentView.bounds) {
+            failures.append("clicked caret should remain visible in horizontally scrolled viewport")
+        }
 
         return failures
     }
@@ -3160,16 +3553,30 @@ final class FastFileView: NSView {
         return Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
     }
 
-    private func scrollLineToVisible(_ line: Int) {
+    private func scrollCaretToVisible() {
         guard let scrollView = enclosingScrollView else { return }
         let visible = scrollView.contentView.bounds
-        let lineRect = NSRect(x: 0, y: CGFloat(line) * lineHeight, width: bounds.width, height: lineHeight)
+        let targetRect = caretRect().insetBy(dx: -horizontalPadding, dy: -4)
+        let maxX = max(0, bounds.width - visible.width)
+        let maxY = max(0, bounds.height - visible.height)
+        var target = visible.origin
 
-        if lineRect.minY < visible.minY {
-            scrollView.contentView.scroll(to: NSPoint(x: visible.minX, y: lineRect.minY))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        } else if lineRect.maxY > visible.maxY {
-            scrollView.contentView.scroll(to: NSPoint(x: visible.minX, y: lineRect.maxY - visible.height))
+        if targetRect.minX < visible.minX {
+            target.x = targetRect.minX
+        } else if targetRect.maxX > visible.maxX {
+            target.x = targetRect.maxX - visible.width
+        }
+
+        if targetRect.minY < visible.minY {
+            target.y = targetRect.minY
+        } else if targetRect.maxY > visible.maxY {
+            target.y = targetRect.maxY - visible.height
+        }
+
+        target.x = min(max(0, target.x), maxX)
+        target.y = min(max(0, target.y), maxY)
+        if abs(target.x - visible.minX) > 0.5 || abs(target.y - visible.minY) > 0.5 {
+            scrollView.contentView.scroll(to: target)
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
     }
@@ -3212,7 +3619,8 @@ final class FastFileView: NSView {
     }
 
     private func resizeForBuffer() {
-        let width = gutterWidth + horizontalPadding * 2 + CGFloat(min(buffer.maxLineByteCount, 4_000)) * charWidth
+        let measuredColumns = max(buffer.maxLineByteCount, caretColumn + 1)
+        let width = gutterWidth + horizontalPadding * 2 + CGFloat(min(measuredColumns, Self.maxLayoutColumns)) * charWidth
         let height = CGFloat(buffer.lineCount) * lineHeight
         frame = NSRect(x: frame.origin.x, y: frame.origin.y, width: max(900, width), height: max(700, height))
     }
@@ -4107,10 +4515,10 @@ func runLargeLanguageHighlightingBenchmarkIfRequested() {
         ("large.r", "r", true),
         ("README.md", "markdown", true),
         ("large.txt", "text", false),
-        ("Makefile", "makefile", false),
-        ("Dockerfile", "dockerfile", false),
-        ("large.xml", "xml", false),
-        ("large.toml", "toml", false)
+        ("Makefile", "makefile", true),
+        ("Dockerfile", "dockerfile", true),
+        ("large.xml", "xml", true),
+        ("large.toml", "toml", true)
     ]
 
     do {
@@ -4558,8 +4966,10 @@ func runLanguageRegistryBenchmarkIfRequested() {
         ("app.jsx", "javascript", true),
         ("README.md", "markdown", true),
         ("config.yaml", "yaml", true),
-        ("Dockerfile", "dockerfile", false),
-        ("Makefile", "makefile", false),
+        ("Dockerfile", "dockerfile", true),
+        ("Makefile", "makefile", true),
+        ("config.xml", "xml", true),
+        ("config.toml", "toml", true),
         ("script", "python", true),
         ("unknown.artisanfixture", "text", false)
     ]
@@ -4820,6 +5230,91 @@ func runWebScriptingHighlightingBenchmarkIfRequested() {
     }
 }
 
+func runBuildConfigHighlightingBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-build-config-highlighting"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let fixtureDirectory = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL
+
+    do {
+        var failures: [String] = []
+
+        func expect(_ path: String, languageID: String, line: Int, contains requiredKinds: Set<HighlightKind>) throws {
+            let buffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent(path).path)
+            if buffer.languageID != languageID {
+                failures.append("\(path): expected \(languageID), got \(buffer.languageID)")
+            }
+            guard let language = EditorLanguage(rawValue: buffer.languageID),
+                  HighlighterRegistry.usesDedicatedHighlighter(for: language)
+            else {
+                failures.append("\(path): expected dedicated highlighter for \(buffer.languageID)")
+                return
+            }
+            let kinds = Set(buffer.highlightedSegments(at: line).map(\.kind))
+            for kind in requiredKinds where !kinds.contains(kind) {
+                failures.append("\(path): line \(line + 1) missing \(kind.rawValue), got \(kinds.map(\.rawValue).sorted())")
+            }
+        }
+
+        try expect("Makefile", languageID: "makefile", line: 0, contains: [.key, .punctuation])
+        try expect("Makefile", languageID: "makefile", line: 1, contains: [.key, .string, .comment, .punctuation])
+        try expect("Makefile", languageID: "makefile", line: 2, contains: [.keyword, .string])
+        try expect("Dockerfile", languageID: "dockerfile", line: 0, contains: [.keyword])
+        try expect("Dockerfile", languageID: "dockerfile", line: 1, contains: [.keyword, .string, .comment])
+        try expect("Dockerfile", languageID: "dockerfile", line: 2, contains: [.keyword, .number, .punctuation])
+        try expect("config.xml", languageID: "xml", line: 0, contains: [.comment])
+        try expect("config.xml", languageID: "xml", line: 1, contains: [.tag, .attribute, .string, .punctuation])
+        try expect("config.toml", languageID: "toml", line: 0, contains: [.tag, .punctuation])
+        try expect("config.toml", languageID: "toml", line: 1, contains: [.key, .boolean, .punctuation])
+        try expect("config.toml", languageID: "toml", line: 2, contains: [.key, .number])
+        try expect("config.toml", languageID: "toml", line: 3, contains: [.key, .string, .comment])
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.build_config_highlighting=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
+@MainActor
+func runHorizontalCaretVisibilityBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-horizontal-caret-visibility"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        let buffer = try TextBuffer(path: path)
+        let fileView = FastFileView(buffer: buffer)
+        let failures = fileView.benchmarkHorizontalCaretVisibility(viewport: NSSize(width: 420, height: 140))
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.horizontal_caret_visibility=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 func runPreferencesBenchmarkIfRequested() {
     let args = CommandLine.arguments
     guard let modeIndex = args.firstIndex(of: "--benchmark-preferences"),
@@ -4960,6 +5455,8 @@ runTSJSHighlightingBenchmarkIfRequested()
 runDocDataHighlightingBenchmarkIfRequested()
 runCFamilyHighlightingBenchmarkIfRequested()
 runWebScriptingHighlightingBenchmarkIfRequested()
+runBuildConfigHighlightingBenchmarkIfRequested()
+runHorizontalCaretVisibilityBenchmarkIfRequested()
 runPreferencesBenchmarkIfRequested()
 runEditorCoreBenchmarkIfRequested()
 

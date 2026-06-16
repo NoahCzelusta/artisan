@@ -132,5 +132,7 @@ for ms in "${cold_results[@]}"; do
 done
 
 "$ROOT_DIR/scripts/check-all-language-highlighting-benchmarks.sh"
+"$ROOT_DIR/scripts/check-build-config-highlighting.sh"
+"$ROOT_DIR/scripts/check-horizontal-caret-visibility.sh"
 
 echo "benchmark result: PASS"

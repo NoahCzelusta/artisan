@@ -16,6 +16,8 @@ The runner:
 - generates deterministic 10 MiB fixtures under `.scratch/benchmark-fixtures/`
 - runs the app benchmark mode against the TypeScript fixture
 - runs the all-language large highlighting benchmark across every supported language id
+- runs focused highlighting checks for build/config formats: Makefile, Dockerfile, XML, and TOML
+- runs the horizontal caret visibility regression for long lines, Command-Right, click placement, and current-line highlighting
 - measures cold CLI launch/open through `artisan`
 - checks results against `benchmarks/targets.env`
 
@@ -55,6 +57,8 @@ Benchmarks must cover user paths, not only convenient internal APIs:
 - trackpad/mouse-wheel style scrolling
 - keyboard navigation
 - click-to-caret
+- horizontal caret reveal after Command-Right on a long line
+- current-line highlight in a horizontally scrolled viewport
 - character insert
 - delete/backspace
 - newline insert

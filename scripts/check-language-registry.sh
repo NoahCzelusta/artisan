@@ -24,6 +24,12 @@ TXT
 cat >"$FIXTURE_DIR/config.yaml" <<'TXT'
 name: artisan
 TXT
+cat >"$FIXTURE_DIR/config.xml" <<'TXT'
+<config enabled="true" />
+TXT
+cat >"$FIXTURE_DIR/config.toml" <<'TXT'
+enabled = true
+TXT
 cat >"$FIXTURE_DIR/Dockerfile" <<'TXT'
 FROM scratch
 TXT

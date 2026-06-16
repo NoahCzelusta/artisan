@@ -39,6 +39,10 @@ This is a pragmatic first coverage set, not an exact popularity ranking. It is i
 | YAML | `.yml`, `.yaml` | indentation-aware key/value lexer |
 | R | `.r` | R line lexer |
 | Markdown | `.md`, `.mdx`, `.markdown` | markdown block/inline lexer |
+| Makefile | `Makefile`, `GNUmakefile` | target, assignment, recipe, and comment lexer |
+| Dockerfile | `Dockerfile*` | instruction and shell-value lexer |
+| XML | `.xml` | tag/attribute lexer |
+| TOML | `.toml` | section and key/value lexer |
 | Plain text | `.txt`, unknown | no-op highlighter |
 
 ## Architecture Direction
@@ -70,6 +74,10 @@ per language through `TextBuffer.highlightedSegments`.
 - `sql`: line-local SQL keyword lexer with strings, numbers, punctuation, and `--` comments.
 - `html`: line-local tags, attributes, quoted strings, punctuation, and comments.
 - `css`: line-local selectors/properties, strings, numbers, punctuation, and comments.
+- `makefile`: line-local targets, assignments, recipe commands, strings, numbers, punctuation, and `#` comments.
+- `dockerfile`: line-local Dockerfile instructions plus shell-style strings, numbers, punctuation, and `#` comments.
+- `xml`: line-local tags, attributes, quoted strings, punctuation, and comments.
+- `toml`: line-local sections, keys, strings, numbers, booleans, punctuation, and `#` comments.
 
 ## Deferred Work
 
