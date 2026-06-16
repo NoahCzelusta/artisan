@@ -35,6 +35,7 @@ dist/
 .scratch/edit-fixtures/
 .scratch/find-fixtures/
 .scratch/navigation-fixtures/
+.scratch/native-menu-fixtures/
 .scratch/selection-editing-fixtures/
 .scratch/selection-fixtures/
 .scratch/save-fixtures/

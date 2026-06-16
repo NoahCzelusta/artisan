@@ -991,6 +991,42 @@ final class FastFileView: NSView {
         !findQuery.isEmpty
     }
 
+    var hasSelection: Bool {
+        normalizedSelectionRange() != nil
+    }
+
+    var canUndoEdit: Bool {
+        !undoStack.isEmpty
+    }
+
+    var canRedoEdit: Bool {
+        !redoStack.isEmpty
+    }
+
+    func performUndoCommand() {
+        undo()
+    }
+
+    func performRedoCommand() {
+        redo()
+    }
+
+    func performCutCommand() {
+        cutSelectionToPasteboard()
+    }
+
+    func performCopyCommand() {
+        _ = copySelectionToPasteboard()
+    }
+
+    func performPasteCommand() {
+        pasteFromClipboard()
+    }
+
+    func performSelectAllCommand() {
+        selectAll()
+    }
+
     @discardableResult
     func setFindQuery(_ query: String) -> Int {
         findQuery = query
@@ -2089,6 +2125,61 @@ final class FastFileView: NSView {
         return failures
     }
 
+    func benchmarkNativeMenuCommands() -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        var failures: [String] = []
+
+        let pasteboard = NSPasteboard.general
+        let previousClipboard = pasteboard.string(forType: .string)
+        defer {
+            pasteboard.clearContents()
+            if let previousClipboard {
+                pasteboard.setString(previousClipboard, forType: .string)
+            }
+        }
+
+        func expect(_ actual: String, _ expected: String, _ label: String) {
+            if actual != expected {
+                failures.append("\(label): expected \(expected), got \(actual)")
+            }
+        }
+
+        func expectLine(_ line: Int, _ expected: String, _ label: String) {
+            expect(buffer.lineText(at: line), expected, label)
+        }
+
+        moveCaret(line: 0, column: 5)
+        applyEdit(affectedLines: 0...0, coalescesTyping: true) {
+            buffer.insert("!", atLine: caretLine, column: caretColumn)
+        }
+        expectLine(0, "alpha! beta", "menu benchmark edit applies")
+        performUndoCommand()
+        expectLine(0, "alpha beta", "menu undo")
+        performRedoCommand()
+        expectLine(0, "alpha! beta", "menu redo")
+
+        setSelection(anchor: TextPosition(line: 0, column: 0), active: TextPosition(line: 0, column: 5))
+        performCopyCommand()
+        expect(pasteboard.string(forType: .string) ?? "", "alpha", "menu copy")
+
+        performCutCommand()
+        expectLine(0, "! beta", "menu cut")
+        performUndoCommand()
+        expectLine(0, "alpha! beta", "undo menu cut")
+
+        pasteboard.clearContents()
+        pasteboard.setString("PASTE", forType: .string)
+        moveCaret(line: 1, column: 5)
+        performPasteCommand()
+        expectLine(1, "gammaPASTE delta", "menu paste")
+
+        performSelectAllCommand()
+        expect(selectionDescription(), "0:0-1:16", "menu select all")
+
+        return failures
+    }
+
     func benchmarkHighlighting(iterations: Int) -> Double {
         buffer.ensureFullyIndexed()
         let start = DispatchTime.now().uptimeNanoseconds
@@ -2296,6 +2387,54 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         close(item: item)
     }
 
+    @objc private func undoEdit(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        document.fileView.performUndoCommand()
+    }
+
+    @objc private func redoEdit(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        document.fileView.performRedoCommand()
+    }
+
+    @objc private func cutSelection(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        document.fileView.performCutCommand()
+    }
+
+    @objc private func copySelection(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        document.fileView.performCopyCommand()
+    }
+
+    @objc private func pasteClipboard(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        document.fileView.performPasteCommand()
+    }
+
+    @objc private func selectAllText(_ sender: Any?) {
+        guard let document = selectedDocument() else {
+            NSSound.beep()
+            return
+        }
+        document.fileView.performSelectAllCommand()
+    }
+
     @objc private func showFindPanel(_ sender: Any?) {
         guard let document = selectedDocument() else {
             NSSound.beep()
@@ -2359,6 +2498,42 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         close(item: tabViewItem)
     }
 
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard let action = menuItem.action else {
+            return true
+        }
+
+        if action == #selector(openDocument(_:)) {
+            return true
+        }
+
+        guard let document = selectedDocument() else {
+            return action == #selector(NSApplication.terminate(_:))
+        }
+
+        switch action {
+        case #selector(saveDocument(_:)):
+            return document.isDirty
+        case #selector(closeCurrentTab(_:)),
+             #selector(showFindPanel(_:)),
+             #selector(findNextResult(_:)),
+             #selector(findPreviousResult(_:)),
+             #selector(selectAllText(_:)):
+            return true
+        case #selector(undoEdit(_:)):
+            return document.fileView.canUndoEdit
+        case #selector(redoEdit(_:)):
+            return document.fileView.canRedoEdit
+        case #selector(cutSelection(_:)),
+             #selector(copySelection(_:)):
+            return document.fileView.hasSelection
+        case #selector(pasteClipboard(_:)):
+            return NSPasteboard.general.string(forType: .string) != nil
+        default:
+            return true
+        }
+    }
+
     private func configureWindow() {
         window.title = "Artisan"
         window.isRestorable = false
@@ -2375,10 +2550,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         let appMenuItem = NSMenuItem()
         let fileMenuItem = NSMenuItem()
         let editMenuItem = NSMenuItem()
+        let windowMenuItem = NSMenuItem()
 
         mainMenu.addItem(appMenuItem)
         mainMenu.addItem(fileMenuItem)
         mainMenu.addItem(editMenuItem)
+        mainMenu.addItem(windowMenuItem)
 
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Quit Artisan", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -2394,6 +2571,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         fileMenuItem.submenu = fileMenu
 
         let editMenu = NSMenu(title: "Edit")
+        let undoItem = editMenu.addItem(withTitle: "Undo", action: #selector(undoEdit(_:)), keyEquivalent: "z")
+        undoItem.target = self
+        let redoItem = editMenu.addItem(withTitle: "Redo", action: #selector(redoEdit(_:)), keyEquivalent: "z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        redoItem.target = self
+        editMenu.addItem(.separator())
+        let cutItem = editMenu.addItem(withTitle: "Cut", action: #selector(cutSelection(_:)), keyEquivalent: "x")
+        cutItem.target = self
+        let copyItem = editMenu.addItem(withTitle: "Copy", action: #selector(copySelection(_:)), keyEquivalent: "c")
+        copyItem.target = self
+        let pasteItem = editMenu.addItem(withTitle: "Paste", action: #selector(pasteClipboard(_:)), keyEquivalent: "v")
+        pasteItem.target = self
+        let selectAllItem = editMenu.addItem(withTitle: "Select All", action: #selector(selectAllText(_:)), keyEquivalent: "a")
+        selectAllItem.target = self
+        editMenu.addItem(.separator())
         let findItem = editMenu.addItem(withTitle: "Find...", action: #selector(showFindPanel(_:)), keyEquivalent: "f")
         findItem.target = self
         let findNextItem = editMenu.addItem(withTitle: "Find Next", action: #selector(findNextResult(_:)), keyEquivalent: "g")
@@ -2403,7 +2595,64 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         findPreviousItem.target = self
         editMenuItem.submenu = editMenu
 
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenuItem.submenu = windowMenu
+        NSApp.windowsMenu = windowMenu
+
         NSApp.mainMenu = mainMenu
+    }
+
+    func benchmarkMenuConfiguration() -> [String] {
+        buildMenu()
+        var failures: [String] = []
+
+        func submenu(_ title: String) -> NSMenu? {
+            NSApp.mainMenu?.items.first { $0.submenu?.title == title }?.submenu
+        }
+
+        func expectItem(
+            _ menu: NSMenu?,
+            title: String,
+            action: Selector,
+            keyEquivalent: String,
+            modifiers: NSEvent.ModifierFlags = .command
+        ) {
+            guard let item = menu?.items.first(where: { $0.title == title }) else {
+                failures.append("missing menu item \(title)")
+                return
+            }
+            if item.action != action {
+                failures.append("\(title) action mismatch")
+            }
+            if item.keyEquivalent != keyEquivalent {
+                failures.append("\(title) key equivalent expected \(keyEquivalent), got \(item.keyEquivalent)")
+            }
+            if item.keyEquivalentModifierMask.intersection([.command, .shift, .option, .control]) != modifiers {
+                failures.append("\(title) modifiers mismatch")
+            }
+        }
+
+        let fileMenu = submenu("File")
+        let editMenu = submenu("Edit")
+        let windowMenu = submenu("Window")
+
+        expectItem(fileMenu, title: "Open...", action: #selector(openDocument(_:)), keyEquivalent: "o")
+        expectItem(fileMenu, title: "Save", action: #selector(saveDocument(_:)), keyEquivalent: "s")
+        expectItem(fileMenu, title: "Close Tab", action: #selector(closeCurrentTab(_:)), keyEquivalent: "w")
+        expectItem(editMenu, title: "Undo", action: #selector(undoEdit(_:)), keyEquivalent: "z")
+        expectItem(editMenu, title: "Redo", action: #selector(redoEdit(_:)), keyEquivalent: "z", modifiers: [.command, .shift])
+        expectItem(editMenu, title: "Cut", action: #selector(cutSelection(_:)), keyEquivalent: "x")
+        expectItem(editMenu, title: "Copy", action: #selector(copySelection(_:)), keyEquivalent: "c")
+        expectItem(editMenu, title: "Paste", action: #selector(pasteClipboard(_:)), keyEquivalent: "v")
+        expectItem(editMenu, title: "Select All", action: #selector(selectAllText(_:)), keyEquivalent: "a")
+        expectItem(editMenu, title: "Find...", action: #selector(showFindPanel(_:)), keyEquivalent: "f")
+        expectItem(editMenu, title: "Find Next", action: #selector(findNextResult(_:)), keyEquivalent: "g")
+        expectItem(editMenu, title: "Find Previous", action: #selector(findPreviousResult(_:)), keyEquivalent: "g", modifiers: [.command, .shift])
+        expectItem(windowMenu, title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+
+        return failures
     }
 
     private func handle(request: OpenRequest, responseFD fd: Int32) {
@@ -3140,6 +3389,39 @@ func runFindBenchmarkIfRequested() {
     }
 }
 
+@MainActor
+func runNativeMenusBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-native-menus"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        _ = NSApplication.shared
+        let controller = AppController()
+        var failures = controller.benchmarkMenuConfiguration()
+
+        let buffer = try TextBuffer(path: path)
+        let fileView = FastFileView(buffer: buffer)
+        failures.append(contentsOf: fileView.benchmarkNativeMenuCommands())
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.native_menus=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -3149,6 +3431,7 @@ runSelectionModelBenchmarkIfRequested()
 runSelectionEditingBenchmarkIfRequested()
 runUndoRedoBenchmarkIfRequested()
 runFindBenchmarkIfRequested()
+runNativeMenusBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()
