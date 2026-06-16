@@ -22,6 +22,8 @@ Homebrew cask backed by GitHub Release assets.
   real Homebrew install flow before signing credentials are ready.
 - Fully trusted teammate downloads still require Developer ID signing plus
   notarization.
+- The `0.0.1` Homebrew install path has been verified, but macOS rejects normal
+  launch while the installed app is quarantined and only ad hoc signed.
 
 ## Target Release Path
 
@@ -169,16 +171,28 @@ end
 
 This matches the current CLI assumption that the executable lives next to
 `Artisan.app` inside the staged artifact. After the workflow updates
-`Casks/artisan.rb`, the cask must be tested with:
+`Casks/artisan.rb`, the install path must be tested with:
 
 ```bash
 brew tap NoahCzelusta/artisan https://github.com/NoahCzelusta/artisan
 brew install --cask NoahCzelusta/artisan/artisan
-artisan README.md
-artisan --wait README.md
 brew uninstall --cask NoahCzelusta/artisan/artisan
 brew audit --new --cask NoahCzelusta/artisan/artisan
 ```
+
+After trusted signing is in place, the launch path must also be tested with:
+
+```bash
+artisan README.md
+artisan --wait README.md
+```
+
+The `0.0.1` verification result is:
+
+- `brew install --cask NoahCzelusta/artisan/artisan` succeeds.
+- `brew audit --cask NoahCzelusta/artisan/artisan` passes.
+- `spctl --assess --type execute /Applications/Artisan.app` rejects the app
+  because the build is not Developer ID signed/notarized.
 
 The official `homebrew-cask` repository should be a later step. Homebrew's
 acceptable casks guidance says low-notability casks may be rejected from the

@@ -89,12 +89,19 @@ Install from the public Homebrew tap:
 ```bash
 brew tap NoahCzelusta/artisan https://github.com/NoahCzelusta/artisan
 brew install --cask NoahCzelusta/artisan/artisan
+```
+
+After macOS trusts the installed app, launch files with:
+
+```bash
 artisan README.md
 artisan --wait README.md
 ```
 
 The first public cask is intentionally ad hoc signed while Developer ID signing
-and notarization remain deferred; see [docs/distribution.md](docs/distribution.md).
+and notarization remain deferred. Homebrew can install `0.0.1`, but Gatekeeper
+may reject launch until the app is Developer ID signed and notarized; see
+[docs/distribution.md](docs/distribution.md).
 
 ## Documentation
 
