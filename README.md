@@ -51,6 +51,23 @@ For a single local build/run entrypoint, use:
 script/build_and_run.sh README.md
 ```
 
+Install the release app and CLI locally:
+
+```bash
+scripts/install-local.sh
+artisan README.md
+artisan --wait README.md
+```
+
+By default this installs `Artisan.app` and the real CLI binary under
+`~/.local/share/artisan`, plus a PATH wrapper at `~/.local/bin/artisan`. Set
+`ARTISAN_INSTALL_ROOT` or `ARTISAN_BIN_DIR` to override those paths. Uninstall
+with:
+
+```bash
+scripts/uninstall-local.sh
+```
+
 ## Documentation
 
 - [CONTEXT.md](CONTEXT.md) defines the product language.

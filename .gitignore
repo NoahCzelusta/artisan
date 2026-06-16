@@ -38,6 +38,7 @@ dist/
 .scratch/edit-fixtures/
 .scratch/find-fixtures/
 .scratch/language-registry-fixtures/
+.scratch/local-install-fixtures/
 .scratch/navigation-fixtures/
 .scratch/native-menu-fixtures/
 .scratch/preferences-fixtures/
