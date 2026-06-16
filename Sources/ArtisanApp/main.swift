@@ -18,6 +18,18 @@ struct HighlightSegment {
     let color: NSColor
 }
 
+struct TextPosition: Comparable, Equatable {
+    let line: Int
+    let column: Int
+
+    static func < (lhs: TextPosition, rhs: TextPosition) -> Bool {
+        if lhs.line != rhs.line {
+            return lhs.line < rhs.line
+        }
+        return lhs.column < rhs.column
+    }
+}
+
 struct FileSnapshot: Equatable {
     let byteCount: Int
     let modifiedAt: Date?
@@ -176,6 +188,58 @@ final class TextBuffer {
         return (lineIndex + insertedLineCount, lastPastedLine.count)
     }
 
+    func text(in range: (start: TextPosition, end: TextPosition)) -> String {
+        let normalized = normalizedRange(range)
+        let start = normalized.start
+        let end = normalized.end
+        guard start != end else { return "" }
+
+        if start.line == end.line {
+            return textSlice(lineText(at: start.line), start: start.column, end: end.column)
+        }
+
+        var pieces = [String]()
+        pieces.append(textSuffix(lineText(at: start.line), from: start.column))
+        if end.line > start.line + 1 {
+            for line in (start.line + 1)..<end.line {
+                pieces.append(lineText(at: line))
+            }
+        }
+        pieces.append(textPrefix(lineText(at: end.line), through: end.column))
+        return pieces.joined(separator: "\n")
+    }
+
+    func delete(in range: (start: TextPosition, end: TextPosition)) -> TextPosition {
+        let normalized = normalizedRange(range)
+        let start = normalized.start
+        let end = normalized.end
+        guard start != end else { return start }
+
+        if start.line == end.line {
+            var line = lineText(at: start.line)
+            let startIndex = line.index(line.startIndex, offsetBy: start.column)
+            let endIndex = line.index(line.startIndex, offsetBy: end.column)
+            line.removeSubrange(startIndex..<endIndex)
+            updateLine(start.line, text: line)
+            return start
+        }
+
+        let prefix = textPrefix(lineText(at: start.line), through: start.column)
+        let suffix = textSuffix(lineText(at: end.line), from: end.column)
+        updateLine(start.line, text: prefix + suffix)
+
+        let removedLineCount = end.line - start.line
+        for _ in 0..<removedLineCount {
+            let removalIndex = start.line + 1
+            guard removalIndex < lineStarts.count else { break }
+            lineStarts.remove(at: removalIndex)
+            shiftSparseStateAfterLineRemoval(at: removalIndex)
+        }
+
+        highlightCache.removeAll(keepingCapacity: true)
+        return start
+    }
+
     func insertNewline(atLine lineIndex: Int, column: Int) -> (line: Int, column: Int) {
         guard lineIndex >= 0, lineIndex < lineStarts.count else { return (0, 0) }
         let line = lineText(at: lineIndex)
@@ -300,6 +364,44 @@ final class TextBuffer {
         lineVersions[lineIndex, default: 0] += 1
         maxLineByteCount = max(maxLineByteCount, text.utf8.count)
         highlightCache.removeValue(forKey: lineIndex)
+    }
+
+    private func normalizedRange(_ range: (start: TextPosition, end: TextPosition)) -> (start: TextPosition, end: TextPosition) {
+        let rawStart = range.start < range.end ? range.start : range.end
+        let rawEnd = range.start < range.end ? range.end : range.start
+        return (
+            start: clampedPosition(rawStart),
+            end: clampedPosition(rawEnd)
+        )
+    }
+
+    private func clampedPosition(_ position: TextPosition) -> TextPosition {
+        if position.line >= lineStarts.count && !fullyIndexed {
+            ensureFullyIndexed()
+        }
+        let safeLine = min(max(0, position.line), lineCount - 1)
+        let safeColumn = min(max(0, position.column), lineText(at: safeLine).count)
+        return TextPosition(line: safeLine, column: safeColumn)
+    }
+
+    private func textPrefix(_ text: String, through column: Int) -> String {
+        let safeColumn = min(max(0, column), text.count)
+        let end = text.index(text.startIndex, offsetBy: safeColumn)
+        return String(text[..<end])
+    }
+
+    private func textSuffix(_ text: String, from column: Int) -> String {
+        let safeColumn = min(max(0, column), text.count)
+        let start = text.index(text.startIndex, offsetBy: safeColumn)
+        return String(text[start...])
+    }
+
+    private func textSlice(_ text: String, start: Int, end: Int) -> String {
+        let safeStart = min(max(0, start), text.count)
+        let safeEnd = min(max(safeStart, end), text.count)
+        let startIndex = text.index(text.startIndex, offsetBy: safeStart)
+        let endIndex = text.index(text.startIndex, offsetBy: safeEnd)
+        return String(text[startIndex..<endIndex])
     }
 
     private func rebuildIndex(limitBytes: Int) {
@@ -516,18 +618,6 @@ final class EditorClipView: NSClipView {
     }
 }
 
-struct TextPosition: Comparable, Equatable {
-    let line: Int
-    let column: Int
-
-    static func < (lhs: TextPosition, rhs: TextPosition) -> Bool {
-        if lhs.line != rhs.line {
-            return lhs.line < rhs.line
-        }
-        return lhs.column < rhs.column
-    }
-}
-
 final class FastFileView: NSView {
     private var buffer: TextBuffer
     private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -623,9 +713,21 @@ final class FastFileView: NSView {
     override func keyDown(with event: NSEvent) {
         let extendingSelection = event.modifierFlags.contains(.shift)
         if event.modifierFlags.contains(.command) {
-            if event.charactersIgnoringModifiers?.lowercased() == "v" {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "a":
+                selectAll()
+                return
+            case "c":
+                _ = copySelectionToPasteboard()
+                return
+            case "x":
+                cutSelectionToPasteboard()
+                return
+            case "v":
                 pasteFromClipboard()
                 return
+            default:
+                break
             }
             switch event.keyCode {
             case 123:
@@ -656,11 +758,11 @@ final class FastFileView: NSView {
 
         switch event.keyCode {
         case 51:
-            applyEdit { buffer.deleteBackward(atLine: caretLine, column: caretColumn) }
+            applyEdit { deleteSelectionIfNeeded() ?? buffer.deleteBackward(atLine: caretLine, column: caretColumn) }
         case 117:
-            applyEdit { buffer.deleteForward(atLine: caretLine, column: caretColumn) }
+            applyEdit { deleteSelectionIfNeeded() ?? buffer.deleteForward(atLine: caretLine, column: caretColumn) }
         case 36, 76:
-            applyEdit { buffer.insertNewline(atLine: caretLine, column: caretColumn) }
+            applyEdit { replaceSelection(with: "\n") }
         case 123:
             moveCharacterLeft(extending: extendingSelection)
         case 124:
@@ -679,7 +781,7 @@ final class FastFileView: NSView {
             moveToLineEnd(extending: extendingSelection)
         default:
             if let characters = event.characters, characters.unicodeScalars.allSatisfy({ $0.value >= 32 && $0.value != 127 }) {
-                applyEdit { buffer.insert(characters, atLine: caretLine, column: caretColumn) }
+                applyEdit { replaceSelection(with: characters) }
             } else {
                 super.keyDown(with: event)
             }
@@ -690,7 +792,7 @@ final class FastFileView: NSView {
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
             return
         }
-        applyEdit { buffer.insertText(text, atLine: caretLine, column: caretColumn) }
+        applyEdit { replaceSelection(with: text) }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -966,18 +1068,78 @@ final class FastFileView: NSView {
         return "\(range.start.line):\(range.start.column)-\(range.end.line):\(range.end.column)"
     }
 
+    private func selectedText() -> String? {
+        guard let range = normalizedSelectionRange() else {
+            return nil
+        }
+        return buffer.text(in: range)
+    }
+
+    @discardableResult
+    private func copySelectionToPasteboard() -> Bool {
+        guard let text = selectedText(), !text.isEmpty else {
+            return false
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.setString(text, forType: .string)
+    }
+
+    private func cutSelectionToPasteboard() {
+        guard copySelectionToPasteboard() else {
+            return
+        }
+        applyEdit { deleteSelectionIfNeeded() ?? (caretLine, caretColumn) }
+    }
+
+    private func selectAll() {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        let lastLine = max(0, buffer.lineCount - 1)
+        let end = TextPosition(line: lastLine, column: buffer.lineText(at: lastLine).count)
+        setSelection(anchor: TextPosition(line: 0, column: 0), active: end)
+    }
+
+    private func deleteSelectionIfNeeded() -> (line: Int, column: Int)? {
+        guard let range = normalizedSelectionRange() else {
+            return nil
+        }
+        let position = buffer.delete(in: range)
+        return (position.line, position.column)
+    }
+
+    private func replaceSelection(with text: String) -> (line: Int, column: Int) {
+        if let range = normalizedSelectionRange() {
+            let start = buffer.delete(in: range)
+            guard !text.isEmpty else {
+                return (start.line, start.column)
+            }
+            return buffer.insertText(text, atLine: start.line, column: start.column)
+        }
+        return buffer.insertText(text, atLine: caretLine, column: caretColumn)
+    }
+
     private func applyEdit(_ operation: () -> (line: Int, column: Int)) {
         let oldLine = caretLine
+        let hadSelection = normalizedSelectionRange() != nil
         let result = operation()
         caretLine = result.line
         caretColumn = result.column
         clearSelection()
         onEdit?()
-        attributedLineCache.removeValue(forKey: oldLine)
-        attributedLineCache.removeValue(forKey: caretLine)
+        if hadSelection {
+            attributedLineCache.removeAll(keepingCapacity: true)
+        } else {
+            attributedLineCache.removeValue(forKey: oldLine)
+            attributedLineCache.removeValue(forKey: caretLine)
+        }
         resizeForBuffer()
         scrollLineToVisible(caretLine)
-        markLinesDirty(oldLine, caretLine)
+        if hadSelection {
+            setNeedsDisplay(bounds)
+        } else {
+            markLinesDirty(oldLine, caretLine)
+        }
     }
 
     func save() throws {
@@ -1247,6 +1409,135 @@ final class FastFileView: NSView {
         expectColumns("selection columns line 2", line: 2, start: 0, end: 4)
 
         return failures
+    }
+
+    func benchmarkSelectionEditing() -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        var failures: [String] = []
+        var editCount = 0
+        onEdit = { editCount += 1 }
+
+        let pasteboard = NSPasteboard.general
+        let previousClipboard = pasteboard.string(forType: .string)
+        defer {
+            pasteboard.clearContents()
+            if let previousClipboard {
+                pasteboard.setString(previousClipboard, forType: .string)
+            }
+        }
+
+        func expect(_ actual: String, _ expected: String, _ label: String) {
+            if actual != expected {
+                failures.append("\(label): expected \(expected), got \(actual)")
+            }
+        }
+
+        func expectLine(_ line: Int, _ expected: String, _ label: String) {
+            expect(buffer.lineText(at: line), expected, label)
+        }
+
+        func expectSelection(_ expected: String, _ label: String) {
+            expect(selectionDescription(), expected, label)
+        }
+
+        func expectClipboard(_ expected: String, _ label: String) {
+            expect(pasteboard.string(forType: .string) ?? "", expected, label)
+        }
+
+        func keyEvent(
+            characters: String,
+            ignoring: String,
+            flags: NSEvent.ModifierFlags = [],
+            keyCode: UInt16
+        ) -> NSEvent {
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: flags,
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: ignoring,
+                isARepeat: false,
+                keyCode: keyCode
+            )!
+        }
+
+        func command(_ character: String, keyCode: UInt16) {
+            keyDown(with: keyEvent(characters: character, ignoring: character, flags: .command, keyCode: keyCode))
+        }
+
+        func type(_ text: String) {
+            keyDown(with: keyEvent(characters: text, ignoring: text, keyCode: 0))
+        }
+
+        func backspace() {
+            keyDown(with: keyEvent(characters: "", ignoring: "", keyCode: 51))
+        }
+
+        command("a", keyCode: 0)
+        expectSelection("0:0-2:8", "command-a selects all")
+
+        command("c", keyCode: 8)
+        expectClipboard("one two\nthree four\nfive six", "command-c copies multiline selection")
+        if editCount != 0 {
+            failures.append("copy should not dirty document")
+        }
+
+        setSelection(anchor: TextPosition(line: 0, column: 4), active: TextPosition(line: 0, column: 7))
+        type("TWO")
+        expectLine(0, "one TWO", "typing replaces single-line selection")
+        expectSelection("none", "typing clears selection")
+        if editCount != 1 {
+            failures.append("typing replacement should dirty document once, got \(editCount)")
+        }
+
+        pasteboard.clearContents()
+        pasteboard.setString("alpha\nbeta", forType: .string)
+        setSelection(anchor: TextPosition(line: 0, column: 4), active: TextPosition(line: 1, column: 5))
+        command("v", keyCode: 9)
+        expectLine(0, "one alpha", "paste replacement first line")
+        expectLine(1, "beta four", "paste replacement second line")
+        expectLine(2, "five six", "paste replacement keeps suffix line")
+        expectSelection("none", "paste clears selection")
+
+        let editsBeforeCut = editCount
+        setSelection(anchor: TextPosition(line: 1, column: 0), active: TextPosition(line: 1, column: 4))
+        command("x", keyCode: 7)
+        expectClipboard("beta", "command-x copies selection")
+        expectLine(1, " four", "command-x deletes selection")
+        if editCount != editsBeforeCut + 1 {
+            failures.append("cut should dirty document once")
+        }
+
+        let editsBeforeDelete = editCount
+        setSelection(anchor: TextPosition(line: 0, column: 4), active: TextPosition(line: 1, column: 1))
+        backspace()
+        expectLine(0, "one four", "backspace deletes multiline selection")
+        expectLine(1, "five six", "backspace shifts following line")
+        expectSelection("none", "backspace clears selection")
+        if editCount != editsBeforeDelete + 1 {
+            failures.append("selection delete should dirty document once")
+        }
+
+        command("a", keyCode: 0)
+        expectSelection("0:0-1:8", "command-a updates after multiline edit")
+
+        return failures
+    }
+
+    func benchmarkLargeSelectAll() -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        let lastLine = max(0, buffer.lineCount - 1)
+        let expected = "0:0-\(lastLine):\(buffer.lineText(at: lastLine).count)"
+        selectAll()
+        guard selectionDescription() == expected else {
+            return ["large select all: expected \(expected), got \(selectionDescription())"]
+        }
+        return []
     }
 
     func benchmarkHighlighting(iterations: Int) -> Double {
@@ -2094,12 +2385,58 @@ func runSelectionModelBenchmarkIfRequested() {
     }
 }
 
+func runSelectionEditingBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-selection-editing"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        let buffer = try TextBuffer(path: path)
+        let fileView = FastFileView(buffer: buffer)
+        let failures = fileView.benchmarkSelectionEditing()
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+
+        if args.indices.contains(modeIndex + 2) {
+            let largePath = URL(fileURLWithPath: args[modeIndex + 2]).standardizedFileURL.path
+            let largeBuffer = try TextBuffer(path: largePath)
+            let largeView = FastFileView(buffer: largeBuffer)
+            let start = DispatchTime.now().uptimeNanoseconds
+            let largeFailures = largeView.benchmarkLargeSelectAll()
+            let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            if !largeFailures.isEmpty {
+                for failure in largeFailures {
+                    fputs("benchmark error: \(failure)\n", stderr)
+                }
+                exit(1)
+            }
+            print(String(format: "benchmark.selection_editing_large_select_all_ms=%.2f", elapsedMs))
+            print("benchmark.selection_editing_large_select_all=PASS")
+        }
+
+        print("benchmark.selection_editing=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
 runDiskChangeSaveBenchmarkIfRequested()
 runKeyboardNavigationBenchmarkIfRequested()
 runSelectionModelBenchmarkIfRequested()
+runSelectionEditingBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()
