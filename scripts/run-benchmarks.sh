@@ -21,6 +21,8 @@ FIXTURE="$FIXTURE_DIR/large.ts"
 
 cleanup() {
   pkill -f "$ROOT_DIR/.build/release/ArtisanApp" >/dev/null 2>&1 || true
+  pkill -f "$ROOT_DIR/.build/release/Artisan.app/Contents/MacOS/ArtisanApp" >/dev/null 2>&1 || true
+  pkill -f "$ROOT_DIR/.build/arm64-apple-macosx/release/Artisan.app/Contents/MacOS/ArtisanApp" >/dev/null 2>&1 || true
   pkill -f "$ROOT_DIR/.build/release/artisan" >/dev/null 2>&1 || true
   rm -f "/tmp/artisan-$(id -u).sock"
 }

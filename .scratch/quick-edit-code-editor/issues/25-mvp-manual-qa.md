@@ -73,6 +73,12 @@ The MVP is verified through real user interactions, not only implementation assu
 - 2026-06-16: Agent smoke verification passed with macOS accessibility input plus Computer Use visual confirmation: edited and saved `/tmp/artisan-ui-qa-1781625198.txt` to show `UI-OK alpha`, opened `large.ts`, set the vertical scrollbar to bottom, and confirmed lines `68067...68090` render with TypeScript highlighting.
 - 2026-06-16: Latest benchmark gate passed with cold CLI open runs `194 217 235 228 229` ms; immediate bottom render was `9.31` ms and scroll averaged `5.5916` ms.
 - 2026-06-16: Latest full scripted checks passed: release distribution plan, local install packaging, editor core, preferences, web/scripting highlighting, C-family highlighting, doc/data highlighting, TS/JS highlighting, language registry, native menus, find, undo/redo, selection editing/model, keyboard navigation, disk-change save protection, save operations, edit operations, CLI wait/open, plain text rendering, production targets, and PRD check.
+- 2026-06-16: Direct Computer Use actions now work when the `app` argument is the exact bundle path returned by `get_app_state` (`/Users/noahczelusta/dev/artisan/.build/arm64-apple-macosx/release/Artisan.app/`). Verified `type_text`, `set_value`, and `scroll` against Artisan.
+- 2026-06-16: Direct `type_text` changed `/tmp/artisan-cu-direct-1781626239.txt` to `CU-PATH alpha` and the saved file contents matched on disk.
+- 2026-06-16: Direct Computer Use `set_value` moved the large TypeScript fixture to the bottom and direct Computer Use `scroll` moved it upward; screenshots showed bottom-region highlighted lines around `068054...068077`.
+- 2026-06-16: Fixed `scripts/run-benchmarks.sh` cleanup to kill repo app-bundle `ArtisanApp --server` processes. This removed stale servers that caused a cold CLI outlier.
+- 2026-06-16: Latest benchmark gate passed after cleanup fix with cold CLI open runs `224 199 204 214 202` ms; immediate bottom render was `9.73` ms and scroll averaged `5.5037` ms.
+- 2026-06-16: Latest full scripted checks passed: release distribution plan, local install packaging, editor core, preferences, web/scripting highlighting, C-family highlighting, doc/data highlighting, TS/JS highlighting, language registry, native menus, find, undo/redo, selection editing/model, keyboard navigation, disk-change save protection, save operations, edit operations, CLI wait/open, plain text rendering, production targets, and PRD check.
 
 ### Human QA checklist
 
