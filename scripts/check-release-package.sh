@@ -31,6 +31,8 @@ unzip -l "$ARCHIVE" | rg -q '[[:space:]]artisan$' || fail "archive missing CLI b
 unzip -p "$ARCHIVE" "Artisan.app/Contents/Info.plist" | plutil -lint - >/dev/null || fail "archived Info.plist is invalid"
 ruby -c "$CASK_FILE" >/dev/null || fail "generated cask is not valid Ruby"
 rg -q "version \"$VERSION\"" "$CASK_FILE" || fail "generated cask has wrong version"
+rg -F -q 'v#{version}' "$CASK_FILE" || fail "generated cask URL must interpolate version"
+rg -F -q 'depends_on macos: :sonoma' "$CASK_FILE" || fail "generated cask must use modern macOS dependency syntax"
 rg -q 'app "Artisan\.app"' "$CASK_FILE" || fail "generated cask missing app stanza"
 rg -q 'binary "artisan"' "$CASK_FILE" || fail "generated cask missing binary stanza"
 
