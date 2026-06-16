@@ -31,5 +31,6 @@ dist/
 # Generated benchmark artifacts
 .scratch/benchmark-fixtures/
 .scratch/benchmark-results/
+.scratch/disk-change-fixtures/
 .scratch/edit-fixtures/
 .scratch/save-fixtures/

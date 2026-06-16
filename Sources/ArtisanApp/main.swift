@@ -18,6 +18,20 @@ struct HighlightSegment {
     let color: NSColor
 }
 
+struct FileSnapshot: Equatable {
+    let byteCount: Int
+    let modifiedAt: Date?
+
+    static func read(path: String) throws -> FileSnapshot {
+        let url = URL(fileURLWithPath: path)
+        let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        return FileSnapshot(
+            byteCount: values.fileSize ?? 0,
+            modifiedAt: values.contentModificationDate
+        )
+    }
+}
+
 enum EditorLanguage {
     case plainText
     case typeScript
@@ -35,10 +49,11 @@ enum EditorLanguage {
 
 final class TextBuffer {
     let path: String
-    let data: Data
+    private var data: Data
     private let language: EditorLanguage
-    private let originalLineEnding: String
-    private let originalHadFinalNewline: Bool
+    private var originalLineEnding: String
+    private var originalHadFinalNewline: Bool
+    private var lastKnownDiskSnapshot: FileSnapshot
     private(set) var lineStarts: [Int]
     private(set) var maxLineByteCount: Int
     private var fullyIndexed = false
@@ -53,6 +68,7 @@ final class TextBuffer {
         self.data = try Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
         self.originalLineEnding = TextBuffer.detectLineEnding(in: data)
         self.originalHadFinalNewline = data.last == 10
+        self.lastKnownDiskSnapshot = try FileSnapshot.read(path: path)
 
         var starts = [Int]()
         starts.reserveCapacity(8192)
@@ -91,6 +107,9 @@ final class TextBuffer {
 
         let start = lineStarts[lineIndex]
         var end = lineIndex + 1 < lineStarts.count ? max(start, lineStarts[lineIndex + 1] - 1) : data.count
+        if end > start, data[end - 1] == 10 {
+            end -= 1
+        }
         if end > start, data[end - 1] == 13 {
             end -= 1
         }
@@ -226,6 +245,7 @@ final class TextBuffer {
     func saveAtomically() throws {
         let text = serializedText()
         try Data(text.utf8).write(to: URL(fileURLWithPath: path), options: .atomic)
+        lastKnownDiskSnapshot = try FileSnapshot.read(path: path)
     }
 
     func serializedText() -> String {
@@ -236,6 +256,25 @@ final class TextBuffer {
             text += originalLineEnding
         }
         return text
+    }
+
+    func hasExternalChanges() throws -> Bool {
+        try FileSnapshot.read(path: path) != lastKnownDiskSnapshot
+    }
+
+    func reloadFromDisk() throws {
+        data = try Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
+        originalLineEnding = TextBuffer.detectLineEnding(in: data)
+        originalHadFinalNewline = data.last == 10
+        lastKnownDiskSnapshot = try FileSnapshot.read(path: path)
+        lineStarts = [0]
+        maxLineByteCount = 0
+        fullyIndexed = false
+        estimatedLineCount = 1
+        editedLines.removeAll(keepingCapacity: true)
+        lineVersions.removeAll(keepingCapacity: true)
+        highlightCache.removeAll(keepingCapacity: true)
+        rebuildIndex(limitBytes: min(data.count, 384 * 1024))
     }
 
     func highlightedSegments(at lineIndex: Int) -> [HighlightSegment] {
@@ -478,7 +517,7 @@ final class EditorClipView: NSClipView {
 }
 
 final class FastFileView: NSView {
-    private let buffer: TextBuffer
+    private var buffer: TextBuffer
     private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     private let lineNumberFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
     private let lineNumberColor = NSColor.secondaryLabelColor
@@ -669,6 +708,20 @@ final class FastFileView: NSView {
 
     func save() throws {
         try buffer.saveAtomically()
+    }
+
+    func hasExternalChanges() throws -> Bool {
+        try buffer.hasExternalChanges()
+    }
+
+    func reloadFromDisk() throws {
+        try buffer.reloadFromDisk()
+        caretLine = 0
+        caretColumn = 0
+        attributedLineCache.removeAll(keepingCapacity: true)
+        resizeForBuffer()
+        setNeedsDisplay(bounds)
+        displayIfNeeded()
     }
 
     private func moveCaret(line: Int, column: Int) {
@@ -882,6 +935,12 @@ final class PendingInvocation {
         self.remainingPaths = paths
         self.fd = fd
     }
+}
+
+enum DiskChangeDecision {
+    case reload
+    case saveAnyway
+    case cancel
 }
 
 @MainActor
@@ -1178,6 +1237,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
 
     private func save(document: TabDocument) -> Bool {
         do {
+            if try document.fileView.hasExternalChanges() {
+                switch confirmDiskChange(document: document) {
+                case .reload:
+                    try document.fileView.reloadFromDisk()
+                    document.isDirty = false
+                    updateTabLabel(document)
+                    return false
+                case .saveAnyway:
+                    break
+                case .cancel:
+                    return false
+                }
+            }
+
             try document.fileView.save()
             document.isDirty = false
             updateTabLabel(document)
@@ -1189,6 +1262,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return false
+        }
+    }
+
+    private func confirmDiskChange(document: TabDocument) -> DiskChangeDecision {
+        let alert = NSAlert()
+        alert.messageText = "\(document.displayName) changed on disk"
+        alert.informativeText = "Reload the file, overwrite the disk version with your changes, or cancel the save."
+        alert.addButton(withTitle: "Reload")
+        alert.addButton(withTitle: "Save Anyway")
+        alert.addButton(withTitle: "Cancel")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .reload
+        case .alertSecondButtonReturn:
+            return .saveAnyway
+        default:
+            return .cancel
         }
     }
 
@@ -1480,9 +1571,70 @@ func runSaveOperationsBenchmarkIfRequested() {
     }
 }
 
+func runDiskChangeSaveBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-disk-change-save"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    func assertEqual(_ actual: String, _ expected: String, _ message: String) {
+        guard actual != expected else { return }
+        fputs("benchmark error: \(message): expected \(expected.debugDescription), got \(actual.debugDescription)\n", stderr)
+        exit(1)
+    }
+
+    let directory = URL(fileURLWithPath: args[modeIndex + 1], isDirectory: true).standardizedFileURL
+    do {
+        let cancelURL = directory.appendingPathComponent("cancel.txt")
+        let cancelBuffer = try TextBuffer(path: cancelURL.path)
+        _ = cancelBuffer.insertText("local!", atLine: 0, column: 0)
+        try Data("external\n".utf8).write(to: cancelURL, options: .atomic)
+        guard try cancelBuffer.hasExternalChanges() else {
+            fputs("benchmark error: cancel branch did not detect external change\n", stderr)
+            exit(1)
+        }
+        assertEqual(cancelBuffer.serializedText(), "local!original\n", "cancel branch keeps local buffer")
+
+        let reloadURL = directory.appendingPathComponent("reload.txt")
+        let reloadBuffer = try TextBuffer(path: reloadURL.path)
+        _ = reloadBuffer.insertText("local!", atLine: 0, column: 0)
+        try Data("external\n".utf8).write(to: reloadURL, options: .atomic)
+        guard try reloadBuffer.hasExternalChanges() else {
+            fputs("benchmark error: reload branch did not detect external change\n", stderr)
+            exit(1)
+        }
+        try reloadBuffer.reloadFromDisk()
+        assertEqual(reloadBuffer.lineText(at: 0), "external", "reload branch updates buffer from disk")
+
+        let saveAnywayURL = directory.appendingPathComponent("save-anyway.txt")
+        let saveAnywayBuffer = try TextBuffer(path: saveAnywayURL.path)
+        _ = saveAnywayBuffer.insertText("local!", atLine: 0, column: 0)
+        try Data("external\n".utf8).write(to: saveAnywayURL, options: .atomic)
+        guard try saveAnywayBuffer.hasExternalChanges() else {
+            fputs("benchmark error: save-anyway branch did not detect external change\n", stderr)
+            exit(1)
+        }
+        try saveAnywayBuffer.saveAtomically()
+        assertEqual(try String(contentsOf: saveAnywayURL, encoding: .utf8), "local!original\n", "save-anyway branch overwrites disk")
+        guard try !saveAnywayBuffer.hasExternalChanges() else {
+            fputs("benchmark error: save-anyway branch did not update snapshot\n", stderr)
+            exit(1)
+        }
+
+        print("benchmark.disk_change_save=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
+runDiskChangeSaveBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()
