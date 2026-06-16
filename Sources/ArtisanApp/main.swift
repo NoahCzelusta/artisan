@@ -22,6 +22,14 @@ enum HighlightKind: String {
     case punctuation
     case tag
     case attribute
+    case heading
+    case code
+    case link
+    case emphasis
+    case key
+    case boolean
+    case null
+    case scalar
 }
 
 struct HighlightSegment {
@@ -691,6 +699,12 @@ enum HighlighterRegistry {
         switch language {
         case .typeScript, .javaScript:
             return TypeScriptHighlighter.highlight(line)
+        case .markdown:
+            return MarkdownHighlighter.highlight(line)
+        case .json:
+            return JSONHighlighter.highlight(line)
+        case .yaml:
+            return YAMLHighlighter.highlight(line)
         default:
             return PlainTextHighlighter.highlight(line)
         }
@@ -698,7 +712,7 @@ enum HighlighterRegistry {
 
     static func usesDedicatedHighlighter(for language: EditorLanguage) -> Bool {
         switch language {
-        case .typeScript, .javaScript:
+        case .typeScript, .javaScript, .markdown, .json, .yaml:
             return true
         default:
             return false
@@ -711,6 +725,210 @@ enum PlainTextHighlighter: LineHighlighter {
 
     static func highlight(_ line: String) -> [HighlightSegment] {
         [HighlightSegment(text: line, color: plain)]
+    }
+}
+
+enum MarkdownHighlighter: LineHighlighter {
+    private static let plain = NSColor.labelColor
+    private static let heading = NSColor.systemBlue
+    private static let code = NSColor.systemPurple
+    private static let link = NSColor.systemTeal
+    private static let emphasis = NSColor.systemOrange
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        if line.hasPrefix("```") {
+            return [HighlightSegment(text: line, color: code, kind: .code)]
+        }
+        if line.hasPrefix("#") {
+            return [HighlightSegment(text: line, color: heading, kind: .heading)]
+        }
+
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+
+        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor, _ kind: HighlightKind = .plain) {
+            guard start < end else { return }
+            segments.append(HighlightSegment(text: String(line[start..<end]), color: color, kind: kind))
+        }
+
+        while index < line.endIndex {
+            let char = line[index]
+            let next = line.index(after: index)
+
+            if char == "`", let close = line[next...].firstIndex(of: "`") {
+                append(index, line.index(after: close), code, .code)
+                index = line.index(after: close)
+                continue
+            }
+
+            if char == "[",
+               let closeLabel = line[next...].firstIndex(of: "]"),
+               closeLabel < line.index(before: line.endIndex),
+               line[line.index(after: closeLabel)] == "(",
+               let closeURL = line[line.index(after: closeLabel)..<line.endIndex].firstIndex(of: ")") {
+                append(index, line.index(after: closeURL), link, .link)
+                index = line.index(after: closeURL)
+                continue
+            }
+
+            if char == "*" {
+                if next < line.endIndex, line[next] == "*" {
+                    let contentStart = line.index(after: next)
+                    if let close = line.range(of: "**", range: contentStart..<line.endIndex)?.lowerBound {
+                        append(index, line.index(close, offsetBy: 2), emphasis, .emphasis)
+                        index = line.index(close, offsetBy: 2)
+                        continue
+                    }
+                } else if let close = line[next...].firstIndex(of: "*") {
+                    append(index, line.index(after: close), emphasis, .emphasis)
+                    index = line.index(after: close)
+                    continue
+                }
+            }
+
+            var end = next
+            while end < line.endIndex, !"`[*".contains(line[end]) {
+                end = line.index(after: end)
+            }
+            append(index, end, plain)
+            index = end
+        }
+
+        return segments
+    }
+}
+
+enum JSONHighlighter: LineHighlighter {
+    private static let plain = NSColor.labelColor
+    private static let key = NSColor.systemBlue
+    private static let string = NSColor.systemRed
+    private static let number = NSColor.systemPurple
+    private static let keyword = NSColor.systemOrange
+    private static let comment = NSColor.systemGreen
+    private static let punctuation = NSColor.secondaryLabelColor
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        lexValueLine(line, allowComments: true)
+    }
+
+    fileprivate static func lexValueLine(_ line: String, allowComments: Bool) -> [HighlightSegment] {
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+
+        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor, _ kind: HighlightKind = .plain) {
+            guard start < end else { return }
+            segments.append(HighlightSegment(text: String(line[start..<end]), color: color, kind: kind))
+        }
+
+        func stringEnd(from start: String.Index, quote: Character) -> String.Index {
+            var end = line.index(after: start)
+            var escaped = false
+            while end < line.endIndex {
+                let char = line[end]
+                let after = line.index(after: end)
+                if escaped {
+                    escaped = false
+                } else if char == "\\" {
+                    escaped = true
+                } else if char == quote {
+                    return after
+                }
+                end = after
+            }
+            return end
+        }
+
+        func stringIsKey(endingAt end: String.Index) -> Bool {
+            var cursor = end
+            while cursor < line.endIndex, line[cursor].isWhitespace {
+                cursor = line.index(after: cursor)
+            }
+            return cursor < line.endIndex && line[cursor] == ":"
+        }
+
+        while index < line.endIndex {
+            let char = line[index]
+            let next = line.index(after: index)
+
+            if allowComments, char == "/", next < line.endIndex, line[next] == "/" {
+                append(index, line.endIndex, comment, .comment)
+                break
+            }
+
+            if char == "\"" {
+                let end = stringEnd(from: index, quote: char)
+                append(index, end, stringIsKey(endingAt: end) ? key : string, stringIsKey(endingAt: end) ? .key : .string)
+                index = end
+                continue
+            }
+
+            if char.isNumber || char == "-" {
+                var end = next
+                while end < line.endIndex, line[end].isNumber || line[end] == "." || line[end] == "e" || line[end] == "E" || line[end] == "+" || line[end] == "-" {
+                    end = line.index(after: end)
+                }
+                append(index, end, number, .number)
+                index = end
+                continue
+            }
+
+            if char.isLetter {
+                var end = next
+                while end < line.endIndex, line[end].isLetter {
+                    end = line.index(after: end)
+                }
+                let word = String(line[index..<end])
+                switch word {
+                case "true", "false":
+                    append(index, end, keyword, .boolean)
+                case "null":
+                    append(index, end, keyword, .null)
+                default:
+                    append(index, end, plain, .scalar)
+                }
+                index = end
+                continue
+            }
+
+            if "{}[]:,".contains(char) {
+                append(index, next, punctuation, .punctuation)
+            } else {
+                append(index, next, plain)
+            }
+            index = next
+        }
+
+        return segments
+    }
+}
+
+enum YAMLHighlighter: LineHighlighter {
+    private static let plain = NSColor.labelColor
+    private static let key = NSColor.systemBlue
+    private static let punctuation = NSColor.secondaryLabelColor
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("#") {
+            return [HighlightSegment(text: line, color: NSColor.systemGreen, kind: .comment)]
+        }
+        guard let colon = line.firstIndex(of: ":") else {
+            return JSONHighlighter.lexValueLine(line, allowComments: true)
+        }
+
+        var segments: [HighlightSegment] = []
+        let afterColon = line.index(after: colon)
+        if line.startIndex < colon {
+            segments.append(HighlightSegment(text: String(line[line.startIndex..<colon]), color: key, kind: .key))
+        }
+        segments.append(HighlightSegment(text: ":", color: punctuation, kind: .punctuation))
+        if afterColon < line.endIndex {
+            segments.append(contentsOf: JSONHighlighter.lexValueLine(String(line[afterColon...]), allowComments: true))
+        }
+        return segments
     }
 }
 
@@ -3726,8 +3944,8 @@ func runLanguageRegistryBenchmarkIfRequested() {
     let expectations: [(name: String, languageID: String, dedicated: Bool)] = [
         ("app.ts", "typescript", true),
         ("app.jsx", "javascript", true),
-        ("README.md", "markdown", false),
-        ("config.yaml", "yaml", false),
+        ("README.md", "markdown", true),
+        ("config.yaml", "yaml", true),
         ("Dockerfile", "dockerfile", false),
         ("Makefile", "makefile", false),
         ("script", "python", false),
@@ -3827,6 +4045,62 @@ func runTSJSHighlightingBenchmarkIfRequested() {
     }
 }
 
+func runDocDataHighlightingBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-doc-data-highlighting"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let fixtureDirectory = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL
+
+    do {
+        var failures: [String] = []
+
+        func expectKinds(_ path: String, line: Int, contains requiredKinds: Set<HighlightKind>) throws {
+            let buffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent(path).path)
+            let kinds = Set(buffer.highlightedSegments(at: line).map(\.kind))
+            for kind in requiredKinds where !kinds.contains(kind) {
+                failures.append("\(path): line \(line + 1) missing \(kind.rawValue), got \(kinds.map(\.rawValue).sorted())")
+            }
+        }
+
+        try expectKinds("README.md", line: 0, contains: [.heading])
+        try expectKinds("README.md", line: 1, contains: [.code, .link, .emphasis])
+        try expectKinds("README.md", line: 2, contains: [.code])
+        try expectKinds("config.jsonc", line: 1, contains: [.comment])
+        try expectKinds("config.jsonc", line: 2, contains: [.key, .boolean, .punctuation])
+        try expectKinds("config.jsonc", line: 3, contains: [.key, .number])
+        try expectKinds("config.jsonc", line: 4, contains: [.key, .null])
+        try expectKinds("config.yaml", line: 0, contains: [.comment])
+        try expectKinds("config.yaml", line: 1, contains: [.key, .string])
+        try expectKinds("config.yaml", line: 2, contains: [.key, .boolean])
+        try expectKinds("config.yaml", line: 3, contains: [.key, .number])
+
+        let plainBuffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent("notes.txt").path)
+        let plainSegments = plainBuffer.highlightedSegments(at: 0)
+        if plainBuffer.languageID != "text" {
+            failures.append("notes.txt language expected text, got \(plainBuffer.languageID)")
+        }
+        if plainSegments.count != 1 || plainSegments.first?.kind != .plain {
+            failures.append("notes.txt should have one plain segment, got \(plainSegments.map(\.kind.rawValue))")
+        }
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.doc_data_highlighting=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -3839,6 +4113,7 @@ runFindBenchmarkIfRequested()
 runNativeMenusBenchmarkIfRequested()
 runLanguageRegistryBenchmarkIfRequested()
 runTSJSHighlightingBenchmarkIfRequested()
+runDocDataHighlightingBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()

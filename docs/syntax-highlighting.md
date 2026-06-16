@@ -58,6 +58,9 @@ Shebang detection is limited to the first line and maps common script runtimes s
 ## Implemented Highlighters
 
 - `typescript` and `javascript`: line-local lexical highlighting for keywords, line comments, inline block comments, strings, numbers, punctuation, and simple JSX/TSX tag and attribute spans.
+- `markdown`: line-local headings, code fences, inline code, links, and emphasis.
+- `json`: line-local strings, object keys, numbers, booleans, nulls, punctuation, and JSONC line comments.
+- `yaml`: line-local comments, keys, quoted strings, numeric scalars, booleans, and punctuation.
 
 ## Deferred Work
 
