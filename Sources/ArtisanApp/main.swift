@@ -240,6 +240,49 @@ final class TextBuffer {
         return start
     }
 
+    func lines(start: Int, count: Int) -> [String] {
+        if start + count > lineStarts.count && !fullyIndexed {
+            ensureFullyIndexed()
+        }
+        let safeStart = min(max(0, start), lineCount - 1)
+        let safeEnd = min(lineCount, safeStart + max(1, count))
+        return (safeStart..<safeEnd).map { lineText(at: $0) }
+    }
+
+    func replaceLines(start: Int, removeCount: Int, with replacementLines: [String]) {
+        if start + removeCount > lineStarts.count && !fullyIndexed {
+            ensureFullyIndexed()
+        }
+
+        let lines = replacementLines.isEmpty ? [""] : replacementLines
+        let safeStart = min(max(0, start), lineCount - 1)
+        let safeRemoveCount = min(max(1, removeCount), lineCount - safeStart)
+
+        updateLine(safeStart, text: lines[0])
+
+        if safeRemoveCount > 1 {
+            for _ in 1..<safeRemoveCount {
+                let removalIndex = safeStart + 1
+                guard removalIndex < lineStarts.count else { break }
+                lineStarts.remove(at: removalIndex)
+                shiftSparseStateAfterLineRemoval(at: removalIndex)
+            }
+        }
+
+        if lines.count > 1 {
+            let insertedCount = lines.count - 1
+            for offset in 1...insertedCount {
+                lineStarts.insert(0, at: safeStart + offset)
+            }
+            shiftSparseStateAfterLineInsertion(at: safeStart + 1, count: insertedCount)
+            for offset in 1...insertedCount {
+                updateLine(safeStart + offset, text: lines[offset])
+            }
+        }
+
+        highlightCache.removeAll(keepingCapacity: true)
+    }
+
     func insertNewline(atLine lineIndex: Int, column: Int) -> (line: Int, column: Int) {
         guard lineIndex >= 0, lineIndex < lineStarts.count else { return (0, 0) }
         let line = lineText(at: lineIndex)
@@ -619,6 +662,22 @@ final class EditorClipView: NSClipView {
 }
 
 final class FastFileView: NSView {
+    private struct SelectionState: Equatable {
+        let anchor: TextPosition?
+        let active: TextPosition?
+    }
+
+    private struct UndoEntry {
+        let startLine: Int
+        let beforeLines: [String]
+        var afterLines: [String]
+        let beforeCaret: TextPosition
+        var afterCaret: TextPosition
+        let beforeSelection: SelectionState
+        var afterSelection: SelectionState
+        let coalescesTyping: Bool
+    }
+
     private var buffer: TextBuffer
     private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     private let lineNumberFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -632,6 +691,8 @@ final class FastFileView: NSView {
     private var caretColumn = 0
     private var selectionAnchor: TextPosition?
     private var selectionActive: TextPosition?
+    private var undoStack: [UndoEntry] = []
+    private var redoStack: [UndoEntry] = []
     private var attributedLineCache: [Int: (version: Int, text: NSAttributedString)] = [:]
     var onEdit: (() -> Void)?
     private(set) var drawCallCount = 0
@@ -726,6 +787,13 @@ final class FastFileView: NSView {
             case "v":
                 pasteFromClipboard()
                 return
+            case "z":
+                if event.modifierFlags.contains(.shift) {
+                    redo()
+                } else {
+                    undo()
+                }
+                return
             default:
                 break
             }
@@ -758,11 +826,17 @@ final class FastFileView: NSView {
 
         switch event.keyCode {
         case 51:
-            applyEdit { deleteSelectionIfNeeded() ?? buffer.deleteBackward(atLine: caretLine, column: caretColumn) }
+            applyEdit(affectedLines: backwardDeleteLineRange()) {
+                deleteSelectionIfNeeded() ?? buffer.deleteBackward(atLine: caretLine, column: caretColumn)
+            }
         case 117:
-            applyEdit { deleteSelectionIfNeeded() ?? buffer.deleteForward(atLine: caretLine, column: caretColumn) }
+            applyEdit(affectedLines: forwardDeleteLineRange()) {
+                deleteSelectionIfNeeded() ?? buffer.deleteForward(atLine: caretLine, column: caretColumn)
+            }
         case 36, 76:
-            applyEdit { replaceSelection(with: "\n") }
+            applyEdit(affectedLines: selectionLineRange() ?? caretLine...caretLine) {
+                replaceSelection(with: "\n")
+            }
         case 123:
             moveCharacterLeft(extending: extendingSelection)
         case 124:
@@ -781,7 +855,12 @@ final class FastFileView: NSView {
             moveToLineEnd(extending: extendingSelection)
         default:
             if let characters = event.characters, characters.unicodeScalars.allSatisfy({ $0.value >= 32 && $0.value != 127 }) {
-                applyEdit { replaceSelection(with: characters) }
+                applyEdit(
+                    affectedLines: selectionLineRange() ?? caretLine...caretLine,
+                    coalescesTyping: normalizedSelectionRange() == nil && characters.count == 1
+                ) {
+                    replaceSelection(with: characters)
+                }
             } else {
                 super.keyDown(with: event)
             }
@@ -792,7 +871,9 @@ final class FastFileView: NSView {
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
             return
         }
-        applyEdit { replaceSelection(with: text) }
+        applyEdit(affectedLines: selectionLineRange() ?? caretLine...caretLine) {
+            replaceSelection(with: text)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1089,7 +1170,9 @@ final class FastFileView: NSView {
         guard copySelectionToPasteboard() else {
             return
         }
-        applyEdit { deleteSelectionIfNeeded() ?? (caretLine, caretColumn) }
+        applyEdit(affectedLines: selectionLineRange() ?? caretLine...caretLine) {
+            deleteSelectionIfNeeded() ?? (caretLine, caretColumn)
+        }
     }
 
     private func selectAll() {
@@ -1119,14 +1202,105 @@ final class FastFileView: NSView {
         return buffer.insertText(text, atLine: caretLine, column: caretColumn)
     }
 
-    private func applyEdit(_ operation: () -> (line: Int, column: Int)) {
+    private func currentSelectionState() -> SelectionState {
+        SelectionState(anchor: selectionAnchor, active: selectionActive)
+    }
+
+    private func restoreSelectionState(_ state: SelectionState) {
+        selectionAnchor = state.anchor
+        selectionActive = state.active
+    }
+
+    private func selectionLineRange() -> ClosedRange<Int>? {
+        guard let range = normalizedSelectionRange() else {
+            return nil
+        }
+        return range.start.line...range.end.line
+    }
+
+    private func backwardDeleteLineRange() -> ClosedRange<Int> {
+        if let range = selectionLineRange() {
+            return range
+        }
+        if caretColumn == 0, caretLine > 0 {
+            return (caretLine - 1)...caretLine
+        }
+        return caretLine...caretLine
+    }
+
+    private func forwardDeleteLineRange() -> ClosedRange<Int> {
+        if let range = selectionLineRange() {
+            return range
+        }
+        if caretColumn >= buffer.lineText(at: caretLine).count, caretLine + 1 < buffer.lineCount {
+            return caretLine...(caretLine + 1)
+        }
+        return caretLine...caretLine
+    }
+
+    private func clampedLineSpan(_ lines: ClosedRange<Int>) -> (start: Int, count: Int) {
+        if lines.upperBound >= buffer.indexedLineCount && !buffer.isFullyIndexed {
+            buffer.ensureFullyIndexed()
+            resizeForBuffer()
+        }
+        let start = min(max(0, lines.lowerBound), buffer.lineCount - 1)
+        let end = min(max(start, lines.upperBound), buffer.lineCount - 1)
+        return (start, end - start + 1)
+    }
+
+    private func recordUndoEntry(_ entry: UndoEntry) {
+        redoStack.removeAll(keepingCapacity: true)
+        if entry.coalescesTyping,
+           var previous = undoStack.last,
+           previous.coalescesTyping,
+           previous.startLine == entry.startLine,
+           previous.afterCaret == entry.beforeCaret,
+           previous.afterSelection == entry.beforeSelection {
+            previous.afterLines = entry.afterLines
+            previous.afterCaret = entry.afterCaret
+            previous.afterSelection = entry.afterSelection
+            undoStack[undoStack.count - 1] = previous
+            return
+        }
+        undoStack.append(entry)
+    }
+
+    private func applyEdit(
+        affectedLines: ClosedRange<Int>? = nil,
+        coalescesTyping: Bool = false,
+        _ operation: () -> (line: Int, column: Int)
+    ) {
         let oldLine = caretLine
         let hadSelection = normalizedSelectionRange() != nil
+        let beforeCaret = currentPosition()
+        let beforeSelection = currentSelectionState()
+        let beforeLineCount = buffer.lineCount
+        let span = clampedLineSpan(affectedLines ?? oldLine...oldLine)
+        let beforeLines = buffer.lines(start: span.start, count: span.count)
+
         let result = operation()
         caretLine = result.line
         caretColumn = result.column
         clearSelection()
-        onEdit?()
+        let afterCaret = currentPosition()
+        let afterSelection = currentSelectionState()
+        let afterCount = max(1, beforeLines.count + buffer.lineCount - beforeLineCount)
+        let afterLines = buffer.lines(start: span.start, count: afterCount)
+        let changedText = beforeLines != afterLines
+        if changedText {
+            recordUndoEntry(UndoEntry(
+                startLine: span.start,
+                beforeLines: beforeLines,
+                afterLines: afterLines,
+                beforeCaret: beforeCaret,
+                afterCaret: afterCaret,
+                beforeSelection: beforeSelection,
+                afterSelection: afterSelection,
+                coalescesTyping: coalescesTyping
+            ))
+            onEdit?()
+        }
+
         if hadSelection {
             attributedLineCache.removeAll(keepingCapacity: true)
         } else {
@@ -1142,6 +1316,43 @@ final class FastFileView: NSView {
         }
     }
 
+    private func undo() {
+        guard let entry = undoStack.popLast() else {
+            return
+        }
+        applyHistory(entry, restoringBeforeState: true)
+        redoStack.append(entry)
+    }
+
+    private func redo() {
+        guard let entry = redoStack.popLast() else {
+            return
+        }
+        applyHistory(entry, restoringBeforeState: false)
+        undoStack.append(entry)
+    }
+
+    private func applyHistory(_ entry: UndoEntry, restoringBeforeState: Bool) {
+        let oldLine = caretLine
+        if restoringBeforeState {
+            buffer.replaceLines(start: entry.startLine, removeCount: entry.afterLines.count, with: entry.beforeLines)
+            caretLine = entry.beforeCaret.line
+            caretColumn = entry.beforeCaret.column
+            restoreSelectionState(entry.beforeSelection)
+        } else {
+            buffer.replaceLines(start: entry.startLine, removeCount: entry.beforeLines.count, with: entry.afterLines)
+            caretLine = entry.afterCaret.line
+            caretColumn = entry.afterCaret.column
+            restoreSelectionState(entry.afterSelection)
+        }
+        attributedLineCache.removeAll(keepingCapacity: true)
+        resizeForBuffer()
+        scrollLineToVisible(caretLine)
+        setNeedsDisplay(bounds)
+        markLinesDirty(oldLine, caretLine)
+        onEdit?()
+    }
+
     func save() throws {
         try buffer.saveAtomically()
     }
@@ -1154,6 +1365,9 @@ final class FastFileView: NSView {
         try buffer.reloadFromDisk()
         caretLine = 0
         caretColumn = 0
+        clearSelection()
+        undoStack.removeAll(keepingCapacity: true)
+        redoStack.removeAll(keepingCapacity: true)
         attributedLineCache.removeAll(keepingCapacity: true)
         resizeForBuffer()
         setNeedsDisplay(bounds)
@@ -1536,6 +1750,148 @@ final class FastFileView: NSView {
         selectAll()
         guard selectionDescription() == expected else {
             return ["large select all: expected \(expected), got \(selectionDescription())"]
+        }
+        return []
+    }
+
+    func benchmarkUndoRedo() -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        var failures: [String] = []
+
+        let pasteboard = NSPasteboard.general
+        let previousClipboard = pasteboard.string(forType: .string)
+        defer {
+            pasteboard.clearContents()
+            if let previousClipboard {
+                pasteboard.setString(previousClipboard, forType: .string)
+            }
+        }
+
+        func expect(_ actual: String, _ expected: String, _ label: String) {
+            if actual != expected {
+                failures.append("\(label): expected \(expected), got \(actual)")
+            }
+        }
+
+        func expectLine(_ line: Int, _ expected: String, _ label: String) {
+            expect(buffer.lineText(at: line), expected, label)
+        }
+
+        func keyEvent(
+            characters: String,
+            ignoring: String,
+            flags: NSEvent.ModifierFlags = [],
+            keyCode: UInt16
+        ) -> NSEvent {
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: flags,
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: ignoring,
+                isARepeat: false,
+                keyCode: keyCode
+            )!
+        }
+
+        func command(_ character: String, keyCode: UInt16, shift: Bool = false) {
+            let flags: NSEvent.ModifierFlags = shift ? [.command, .shift] : .command
+            keyDown(with: keyEvent(characters: character, ignoring: character, flags: flags, keyCode: keyCode))
+        }
+
+        func type(_ text: String) {
+            keyDown(with: keyEvent(characters: text, ignoring: text, keyCode: 0))
+        }
+
+        func enter() {
+            keyDown(with: keyEvent(characters: "\r", ignoring: "\r", keyCode: 36))
+        }
+
+        moveCaret(line: 0, column: 0)
+        type("X")
+        type("Y")
+        type("Z")
+        expectLine(0, "XYZalpha beta", "typing burst applies")
+        if undoStack.count != 1 {
+            failures.append("typing burst should coalesce to one undo entry, got \(undoStack.count)")
+        }
+        command("z", keyCode: 6)
+        expectLine(0, "alpha beta", "undo typing burst")
+        expect(selectionDescription(), "none", "undo typing selection")
+        command("z", keyCode: 6, shift: true)
+        expectLine(0, "XYZalpha beta", "redo typing burst")
+
+        pasteboard.clearContents()
+        pasteboard.setString("one\ntwo", forType: .string)
+        command("v", keyCode: 9)
+        expectLine(0, "XYZone", "paste first line")
+        expectLine(1, "twoalpha beta", "paste second line")
+        command("z", keyCode: 6)
+        expectLine(0, "XYZalpha beta", "undo paste first line")
+        expectLine(1, "gamma delta", "undo paste restores next line")
+        command("z", keyCode: 6, shift: true)
+        expectLine(0, "XYZone", "redo paste first line")
+        expectLine(1, "twoalpha beta", "redo paste second line")
+
+        setSelection(anchor: TextPosition(line: 0, column: 3), active: TextPosition(line: 1, column: 3))
+        type("Q")
+        expectLine(0, "XYZQalpha beta", "selection replacement applies")
+        expectLine(1, "gamma delta", "selection replacement removes second selected line")
+        command("z", keyCode: 6)
+        expectLine(0, "XYZone", "undo selection replacement first line")
+        expectLine(1, "twoalpha beta", "undo selection replacement second line")
+        command("z", keyCode: 6, shift: true)
+        expectLine(0, "XYZQalpha beta", "redo selection replacement")
+
+        setSelection(anchor: TextPosition(line: 0, column: 3), active: TextPosition(line: 0, column: 4))
+        command("x", keyCode: 7)
+        expectLine(0, "XYZalpha beta", "cut deletes selection")
+        expect(pasteboard.string(forType: .string) ?? "", "Q", "cut copies selection")
+        command("z", keyCode: 6)
+        expectLine(0, "XYZQalpha beta", "undo cut")
+        command("z", keyCode: 6, shift: true)
+        expectLine(0, "XYZalpha beta", "redo cut")
+
+        moveCaret(line: 0, column: 3)
+        enter()
+        expectLine(0, "XYZ", "newline first line")
+        expectLine(1, "alpha beta", "newline second line")
+        command("z", keyCode: 6)
+        expectLine(0, "XYZalpha beta", "undo newline")
+        command("z", keyCode: 6, shift: true)
+        expectLine(0, "XYZ", "redo newline first line")
+        expectLine(1, "alpha beta", "redo newline second line")
+
+        return failures
+    }
+
+    func benchmarkLargeBottomUndoRedo() -> [String] {
+        buffer.ensureFullyIndexed()
+        resizeForBuffer()
+        let lastLine = max(0, buffer.lineCount - 1)
+        let original = buffer.lineText(at: lastLine)
+        moveCaret(line: lastLine, column: original.count)
+        applyEdit(affectedLines: lastLine...lastLine, coalescesTyping: true) {
+            buffer.insert("z", atLine: caretLine, column: caretColumn)
+        }
+        guard buffer.lineText(at: lastLine) == original + "z" else {
+            return ["large bottom insert did not apply"]
+        }
+        undo()
+        guard buffer.lineText(at: lastLine) == original else {
+            return ["large bottom undo did not restore original line"]
+        }
+        redo()
+        guard buffer.lineText(at: lastLine) == original + "z" else {
+            return ["large bottom redo did not restore inserted text"]
+        }
+        undo()
+        guard buffer.lineText(at: lastLine) == original else {
+            return ["large bottom second undo did not restore original line"]
         }
         return []
     }
@@ -2430,6 +2786,51 @@ func runSelectionEditingBenchmarkIfRequested() {
     }
 }
 
+func runUndoRedoBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-undo-redo"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    do {
+        let buffer = try TextBuffer(path: path)
+        let fileView = FastFileView(buffer: buffer)
+        let failures = fileView.benchmarkUndoRedo()
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+
+        if args.indices.contains(modeIndex + 2) {
+            let largePath = URL(fileURLWithPath: args[modeIndex + 2]).standardizedFileURL.path
+            let largeBuffer = try TextBuffer(path: largePath)
+            let largeView = FastFileView(buffer: largeBuffer)
+            let start = DispatchTime.now().uptimeNanoseconds
+            let largeFailures = largeView.benchmarkLargeBottomUndoRedo()
+            let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            if !largeFailures.isEmpty {
+                for failure in largeFailures {
+                    fputs("benchmark error: \(failure)\n", stderr)
+                }
+                exit(1)
+            }
+            print(String(format: "benchmark.undo_redo_large_bottom_ms=%.2f", elapsedMs))
+            print("benchmark.undo_redo_large_bottom=PASS")
+        }
+
+        print("benchmark.undo_redo=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -2437,6 +2838,7 @@ runDiskChangeSaveBenchmarkIfRequested()
 runKeyboardNavigationBenchmarkIfRequested()
 runSelectionModelBenchmarkIfRequested()
 runSelectionEditingBenchmarkIfRequested()
+runUndoRedoBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()
