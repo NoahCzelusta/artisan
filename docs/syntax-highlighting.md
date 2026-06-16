@@ -62,6 +62,10 @@ Shebang detection is limited to the first line and maps common script runtimes s
 - `json`: line-local strings, object keys, numbers, booleans, nulls, punctuation, and JSONC line comments.
 - `yaml`: line-local comments, keys, quoted strings, numeric scalars, booleans, and punctuation.
 - `c`, `cpp`, `csharp`, `java`, `go`, `rust`, `swift`, and `kotlin`: shared line-local C-like lexer with per-language keyword sets, comments, strings, numbers, and punctuation.
+- `python`, `ruby`, `php`, `shell`, and `r`: shared line-local scripting lexer with per-language keyword sets, comments, strings, variables where applicable, numbers, and punctuation.
+- `sql`: line-local SQL keyword lexer with strings, numbers, punctuation, and `--` comments.
+- `html`: line-local tags, attributes, quoted strings, punctuation, and comments.
+- `css`: line-local selectors/properties, strings, numbers, punctuation, and comments.
 
 ## Deferred Work
 

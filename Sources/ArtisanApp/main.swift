@@ -721,6 +721,22 @@ enum HighlighterRegistry {
             return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.swiftKeywords)
         case .kotlin:
             return CLikeHighlighter.highlight(line, keywords: CLikeHighlighter.kotlinKeywords)
+        case .python:
+            return ScriptHighlighter.highlight(line, keywords: ScriptHighlighter.pythonKeywords)
+        case .ruby:
+            return ScriptHighlighter.highlight(line, keywords: ScriptHighlighter.rubyKeywords)
+        case .php:
+            return ScriptHighlighter.highlight(line, keywords: ScriptHighlighter.phpKeywords, commentMarkers: ["//", "#"])
+        case .shell:
+            return ScriptHighlighter.highlight(line, keywords: ScriptHighlighter.shellKeywords)
+        case .r:
+            return ScriptHighlighter.highlight(line, keywords: ScriptHighlighter.rKeywords)
+        case .sql:
+            return SQLHighlighter.highlight(line)
+        case .html:
+            return HTMLHighlighter.highlight(line)
+        case .css:
+            return CSSHighlighter.highlight(line)
         default:
             return PlainTextHighlighter.highlight(line)
         }
@@ -730,6 +746,8 @@ enum HighlighterRegistry {
         switch language {
         case .typeScript, .javaScript, .markdown, .json, .yaml,
              .c, .cpp, .cSharp, .java, .go, .rust, .swift, .kotlin:
+            return true
+        case .python, .ruby, .php, .shell, .r, .sql, .html, .css:
             return true
         default:
             return false
@@ -1051,6 +1069,275 @@ enum CLikeHighlighter {
             index = next
         }
 
+        return segments
+    }
+}
+
+enum ScriptHighlighter {
+    static let pythonKeywords: Set<String> = ["and", "as", "assert", "async", "await", "break", "class", "continue", "def", "elif", "else", "except", "False", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "None", "nonlocal", "not", "or", "pass", "raise", "return", "True", "try", "while", "with", "yield"]
+    static let rubyKeywords: Set<String> = ["BEGIN", "END", "alias", "and", "begin", "break", "case", "class", "def", "defined?", "do", "else", "elsif", "end", "ensure", "false", "for", "if", "in", "module", "next", "nil", "not", "or", "redo", "rescue", "retry", "return", "self", "super", "then", "true", "undef", "unless", "until", "when", "while", "yield"]
+    static let phpKeywords: Set<String> = ["abstract", "and", "array", "as", "break", "case", "catch", "class", "const", "continue", "declare", "default", "do", "echo", "else", "elseif", "enddeclare", "endfor", "endforeach", "endif", "endswitch", "endwhile", "extends", "false", "final", "finally", "fn", "for", "foreach", "function", "global", "if", "implements", "include", "instanceof", "interface", "namespace", "new", "null", "or", "private", "protected", "public", "require", "return", "static", "switch", "throw", "trait", "true", "try", "use", "var", "while", "xor"]
+    static let shellKeywords: Set<String> = ["case", "cd", "do", "done", "echo", "elif", "else", "esac", "export", "fi", "for", "function", "if", "in", "local", "printf", "return", "select", "then", "until", "while"]
+    static let rKeywords: Set<String> = ["FALSE", "Inf", "NA", "NULL", "NaN", "TRUE", "break", "else", "for", "function", "if", "in", "next", "repeat", "return", "while"]
+
+    private static let plain = NSColor.labelColor
+    private static let keyword = NSColor.systemBlue
+    private static let string = NSColor.systemRed
+    private static let number = NSColor.systemPurple
+    private static let comment = NSColor.systemGreen
+    private static let punctuation = NSColor.secondaryLabelColor
+    private static let variable = NSColor.systemOrange
+
+    static func highlight(_ line: String, keywords: Set<String>, commentMarkers: [String] = ["#"]) -> [HighlightSegment] {
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+
+        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor, _ kind: HighlightKind = .plain) {
+            guard start < end else { return }
+            segments.append(HighlightSegment(text: String(line[start..<end]), color: color, kind: kind))
+        }
+
+        while index < line.endIndex {
+            for marker in commentMarkers where line[index...].hasPrefix(marker) {
+                append(index, line.endIndex, comment, .comment)
+                return segments
+            }
+
+            let char = line[index]
+            let next = line.index(after: index)
+
+            if char == "\"" || char == "'" {
+                let quote = char
+                var end = next
+                var escaped = false
+                while end < line.endIndex {
+                    let c = line[end]
+                    let after = line.index(after: end)
+                    if escaped {
+                        escaped = false
+                    } else if c == "\\" {
+                        escaped = true
+                    } else if c == quote {
+                        end = after
+                        break
+                    }
+                    end = after
+                }
+                append(index, end, string, .string)
+                index = end
+                continue
+            }
+
+            if char == "$", next < line.endIndex {
+                var end = next
+                while end < line.endIndex, line[end].isLetter || line[end].isNumber || line[end] == "_" {
+                    end = line.index(after: end)
+                }
+                append(index, end, variable, .attribute)
+                index = end
+                continue
+            }
+
+            if char.isNumber {
+                var end = next
+                while end < line.endIndex, line[end].isNumber || line[end] == "." || line[end] == "_" {
+                    end = line.index(after: end)
+                }
+                append(index, end, number, .number)
+                index = end
+                continue
+            }
+
+            if char.isLetter || char == "_" {
+                var end = next
+                while end < line.endIndex, line[end].isLetter || line[end].isNumber || line[end] == "_" || line[end] == "?" {
+                    end = line.index(after: end)
+                }
+                let word = String(line[index..<end])
+                append(index, end, keywords.contains(word) ? keyword : plain, keywords.contains(word) ? .keyword : .plain)
+                index = end
+                continue
+            }
+
+            if "{}[]().,:;+-*=<>!&|?/\\%".contains(char) {
+                append(index, next, punctuation, .punctuation)
+            } else {
+                append(index, next, plain)
+            }
+            index = next
+        }
+
+        return segments
+    }
+}
+
+enum SQLHighlighter: LineHighlighter {
+    private static let keywords: Set<String> = ["ALTER", "AND", "AS", "ASC", "BEGIN", "BETWEEN", "BY", "CASE", "CREATE", "DELETE", "DESC", "DROP", "ELSE", "END", "FALSE", "FROM", "GROUP", "HAVING", "IN", "INSERT", "INTO", "IS", "JOIN", "LEFT", "LIKE", "LIMIT", "NOT", "NULL", "ON", "OR", "ORDER", "RIGHT", "SELECT", "SET", "TABLE", "THEN", "TRUE", "UPDATE", "VALUES", "WHEN", "WHERE"]
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        ScriptHighlighter.highlight(line, keywords: keywords, commentMarkers: ["--"])
+    }
+}
+
+enum HTMLHighlighter: LineHighlighter {
+    private static let plain = NSColor.labelColor
+    private static let tag = NSColor.systemTeal
+    private static let attribute = NSColor.systemOrange
+    private static let string = NSColor.systemRed
+    private static let comment = NSColor.systemGreen
+    private static let punctuation = NSColor.secondaryLabelColor
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        if line.trimmingCharacters(in: .whitespaces).hasPrefix("<!--") {
+            return [HighlightSegment(text: line, color: comment, kind: .comment)]
+        }
+        guard !line.isEmpty else { return [HighlightSegment(text: "", color: plain)] }
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+
+        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor, _ kind: HighlightKind = .plain) {
+            guard start < end else { return }
+            segments.append(HighlightSegment(text: String(line[start..<end]), color: color, kind: kind))
+        }
+
+        func isNameCharacter(_ character: Character) -> Bool {
+            character.isLetter || character.isNumber || character == "-" || character == "_" || character == ":"
+        }
+
+        while index < line.endIndex {
+            let char = line[index]
+            let next = line.index(after: index)
+            guard char == "<" else {
+                var end = next
+                while end < line.endIndex, line[end] != "<" {
+                    end = line.index(after: end)
+                }
+                append(index, end, plain)
+                index = end
+                continue
+            }
+
+            append(index, next, punctuation, .punctuation)
+            index = next
+            if index < line.endIndex, line[index] == "/" {
+                let afterSlash = line.index(after: index)
+                append(index, afterSlash, punctuation, .punctuation)
+                index = afterSlash
+            }
+            if index < line.endIndex, isNameCharacter(line[index]) {
+                var end = line.index(after: index)
+                while end < line.endIndex, isNameCharacter(line[end]) {
+                    end = line.index(after: end)
+                }
+                append(index, end, tag, .tag)
+                index = end
+            }
+            while index < line.endIndex {
+                let current = line[index]
+                let after = line.index(after: index)
+                if current == ">" {
+                    append(index, after, punctuation, .punctuation)
+                    index = after
+                    break
+                }
+                if current == "\"" || current == "'" {
+                    var end = after
+                    while end < line.endIndex {
+                        let nextEnd = line.index(after: end)
+                        if line[end] == current {
+                            end = nextEnd
+                            break
+                        }
+                        end = nextEnd
+                    }
+                    append(index, end, string, .string)
+                    index = end
+                    continue
+                }
+                if isNameCharacter(current) {
+                    var end = after
+                    while end < line.endIndex, isNameCharacter(line[end]) {
+                        end = line.index(after: end)
+                    }
+                    append(index, end, attribute, .attribute)
+                    index = end
+                    continue
+                }
+                append(index, after, "{}[]=/".contains(current) ? punctuation : plain, "{}[]=/".contains(current) ? .punctuation : .plain)
+                index = after
+            }
+        }
+        return segments
+    }
+}
+
+enum CSSHighlighter: LineHighlighter {
+    private static let plain = NSColor.labelColor
+    private static let key = NSColor.systemBlue
+    private static let string = NSColor.systemRed
+    private static let number = NSColor.systemPurple
+    private static let comment = NSColor.systemGreen
+    private static let punctuation = NSColor.secondaryLabelColor
+
+    static func highlight(_ line: String) -> [HighlightSegment] {
+        if line.trimmingCharacters(in: .whitespaces).hasPrefix("/*") {
+            return [HighlightSegment(text: line, color: comment, kind: .comment)]
+        }
+        var segments: [HighlightSegment] = []
+        var index = line.startIndex
+
+        func append(_ start: String.Index, _ end: String.Index, _ color: NSColor, _ kind: HighlightKind = .plain) {
+            guard start < end else { return }
+            segments.append(HighlightSegment(text: String(line[start..<end]), color: color, kind: kind))
+        }
+
+        while index < line.endIndex {
+            let char = line[index]
+            let next = line.index(after: index)
+            if char == "\"" || char == "'" {
+                var end = next
+                while end < line.endIndex {
+                    let after = line.index(after: end)
+                    if line[end] == char {
+                        end = after
+                        break
+                    }
+                    end = after
+                }
+                append(index, end, string, .string)
+                index = end
+                continue
+            }
+            if char.isNumber {
+                var end = next
+                while end < line.endIndex, line[end].isNumber || line[end] == "." {
+                    end = line.index(after: end)
+                }
+                append(index, end, number, .number)
+                index = end
+                continue
+            }
+            if char.isLetter || char == "-" {
+                var end = next
+                while end < line.endIndex, line[end].isLetter || line[end].isNumber || line[end] == "-" {
+                    end = line.index(after: end)
+                }
+                var cursor = end
+                while cursor < line.endIndex, line[cursor].isWhitespace {
+                    cursor = line.index(after: cursor)
+                }
+                append(index, end, cursor < line.endIndex && line[cursor] == ":" ? key : plain, cursor < line.endIndex && line[cursor] == ":" ? .key : .plain)
+                index = end
+                continue
+            }
+            if "{}[]().,:;#%+-*=<>!".contains(char) {
+                append(index, next, punctuation, .punctuation)
+            } else {
+                append(index, next, plain)
+            }
+            index = next
+        }
         return segments
     }
 }
@@ -4071,7 +4358,7 @@ func runLanguageRegistryBenchmarkIfRequested() {
         ("config.yaml", "yaml", true),
         ("Dockerfile", "dockerfile", false),
         ("Makefile", "makefile", false),
-        ("script", "python", false),
+        ("script", "python", true),
         ("unknown.artisanfixture", "text", false)
     ]
 
@@ -4276,6 +4563,61 @@ func runCFamilyHighlightingBenchmarkIfRequested() {
     }
 }
 
+func runWebScriptingHighlightingBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-web-scripting-highlighting"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let fixtureDirectory = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL
+
+    do {
+        var failures: [String] = []
+
+        func expect(_ path: String, languageID: String, line: Int, contains requiredKinds: Set<HighlightKind>) throws {
+            let buffer = try TextBuffer(path: fixtureDirectory.appendingPathComponent(path).path)
+            if buffer.languageID != languageID {
+                failures.append("\(path): expected \(languageID), got \(buffer.languageID)")
+            }
+            let kinds = Set(buffer.highlightedSegments(at: line).map(\.kind))
+            for kind in requiredKinds where !kinds.contains(kind) {
+                failures.append("\(path): line \(line + 1) missing \(kind.rawValue), got \(kinds.map(\.rawValue).sorted())")
+            }
+        }
+
+        try expect("app.py", languageID: "python", line: 0, contains: [.keyword, .punctuation])
+        try expect("app.py", languageID: "python", line: 1, contains: [.number, .comment])
+        try expect("app.py", languageID: "python", line: 2, contains: [.string])
+        try expect("app.rb", languageID: "ruby", line: 0, contains: [.keyword])
+        try expect("app.rb", languageID: "ruby", line: 1, contains: [.number, .comment])
+        try expect("app.php", languageID: "php", line: 0, contains: [.keyword, .attribute, .number, .comment, .punctuation])
+        try expect("run-script", languageID: "shell", line: 1, contains: [.number, .comment, .punctuation])
+        try expect("run-script", languageID: "shell", line: 2, contains: [.keyword, .string])
+        try expect("query.sql", languageID: "sql", line: 0, contains: [.keyword, .number, .comment, .punctuation])
+        try expect("query.sql", languageID: "sql", line: 1, contains: [.keyword, .string])
+        try expect("index.html", languageID: "html", line: 0, contains: [.comment])
+        try expect("index.html", languageID: "html", line: 1, contains: [.tag, .attribute, .string, .punctuation])
+        try expect("styles.css", languageID: "css", line: 0, contains: [.comment])
+        try expect("styles.css", languageID: "css", line: 1, contains: [.key, .string, .number, .punctuation])
+        try expect("analysis.r", languageID: "r", line: 0, contains: [.number, .comment, .punctuation])
+        try expect("analysis.r", languageID: "r", line: 1, contains: [.string])
+
+        if !failures.isEmpty {
+            for failure in failures {
+                fputs("benchmark error: \(failure)\n", stderr)
+            }
+            exit(1)
+        }
+        print("benchmark.web_scripting_highlighting=PASS")
+        exit(0)
+    } catch {
+        fputs("benchmark error: \(error)\n", stderr)
+        exit(1)
+    }
+}
+
 runHighlightModeBenchmarkIfRequested()
 runEditOperationsBenchmarkIfRequested()
 runSaveOperationsBenchmarkIfRequested()
@@ -4290,6 +4632,7 @@ runLanguageRegistryBenchmarkIfRequested()
 runTSJSHighlightingBenchmarkIfRequested()
 runDocDataHighlightingBenchmarkIfRequested()
 runCFamilyHighlightingBenchmarkIfRequested()
+runWebScriptingHighlightingBenchmarkIfRequested()
 
 let app = NSApplication.shared
 let controller = AppController()

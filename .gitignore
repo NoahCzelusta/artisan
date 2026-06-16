@@ -44,3 +44,4 @@ dist/
 .scratch/save-fixtures/
 .scratch/ts-js-highlighting-fixtures/
 .scratch/undo-redo-fixtures/
+.scratch/web-scripting-highlighting-fixtures/
