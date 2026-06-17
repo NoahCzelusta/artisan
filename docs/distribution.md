@@ -1,7 +1,7 @@
 # Release Distribution
 
 This project keeps local development, CI dry-runs, and public distribution
-separate. The contributor path stays repo-local through
+separate. The local development path stays repo-local through
 `scripts/install-local.sh`; the user-facing path goes through a same-repo
 Homebrew cask backed by GitHub Release assets.
 
@@ -24,7 +24,7 @@ Homebrew cask backed by GitHub Release assets.
 
 ## Target Release Path
 
-1. Keep `scripts/install-local.sh` as the repo-local contributor install path.
+1. Keep `scripts/install-local.sh` as the repo-local development install path.
 2. Use `scripts/package-release.sh <version>` to build `Artisan.app` and the
    `artisan` CLI in release mode.
 3. Sign both the app bundle and standalone CLI with a Developer ID Application

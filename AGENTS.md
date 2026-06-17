@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues are tracked as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues are tracked in GitHub Issues for `NoahCzelusta/artisan`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -14,4 +14,4 @@ This repo uses a single-context domain-doc layout with `CONTEXT.md` at the repo 
 
 ### Repo-local skills
 
-When the user asks to cut, publish, ship, or verify an Artisan release, read and follow `skills/cut-artisan-release/SKILL.md`.
+When the user asks to cut, publish, ship, or verify an Artisan release, read and follow `.agents/skills/cut-artisan-release/SKILL.md`.

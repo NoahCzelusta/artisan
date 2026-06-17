@@ -2,10 +2,48 @@ import AppKit
 import Darwin
 import Foundation
 
+struct OpenTarget: Codable, Hashable {
+    let path: String
+    let line: Int?
+}
+
 struct OpenRequest: Codable {
     let invocationID: String
-    let paths: [String]
+    let targets: [OpenTarget]
     let wait: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case invocationID
+        case targets
+        case paths
+        case wait
+    }
+
+    init(invocationID: String, targets: [OpenTarget], wait: Bool) {
+        self.invocationID = invocationID
+        self.targets = targets
+        self.wait = wait
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        invocationID = try container.decode(String.self, forKey: .invocationID)
+        wait = try container.decode(Bool.self, forKey: .wait)
+        if let targets = try container.decodeIfPresent([OpenTarget].self, forKey: .targets) {
+            self.targets = targets
+        } else {
+            let paths = try container.decode([String].self, forKey: .paths)
+            self.targets = paths.map { OpenTarget(path: $0, line: nil) }
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(invocationID, forKey: .invocationID)
+        try container.encode(targets, forKey: .targets)
+        try container.encode(targets.map(\.path), forKey: .paths)
+        try container.encode(wait, forKey: .wait)
+    }
 }
 
 struct OpenResponse: Codable {
@@ -2058,6 +2096,10 @@ final class FastFileView: NSView {
                 break
             }
             switch event.keyCode {
+            case 51:
+                applyEdit(affectedLines: backwardDeleteLineRange()) {
+                    deleteSelectionIfNeeded() ?? deleteToLineStart()
+                }
             case 123:
                 moveToLineStart(extending: extendingSelection)
             case 124:
@@ -2074,6 +2116,10 @@ final class FastFileView: NSView {
 
         if event.modifierFlags.contains(.option) {
             switch event.keyCode {
+            case 51:
+                applyEdit(affectedLines: wordBackwardDeleteLineRange()) {
+                    deleteSelectionIfNeeded() ?? deleteWordBackward()
+                }
             case 123:
                 moveWordLeft(extending: extendingSelection)
             case 124:
@@ -2734,6 +2780,52 @@ final class FastFileView: NSView {
         return caretLine...caretLine
     }
 
+    private func wordBackwardDeleteLineRange() -> ClosedRange<Int> {
+        if let range = selectionLineRange() {
+            return range
+        }
+        if caretColumn == 0, caretLine > 0 {
+            return (caretLine - 1)...caretLine
+        }
+        return caretLine...caretLine
+    }
+
+    private func deleteToLineStart() -> (line: Int, column: Int) {
+        if caretColumn > 0 {
+            let position = buffer.delete(in: (
+                start: TextPosition(line: caretLine, column: 0),
+                end: TextPosition(line: caretLine, column: caretColumn)
+            ))
+            return (position.line, position.column)
+        }
+        return buffer.deleteBackward(atLine: caretLine, column: caretColumn)
+    }
+
+    private func deleteWordBackward() -> (line: Int, column: Int) {
+        if caretColumn > 0 {
+            let line = buffer.lineText(at: caretLine)
+            let startColumn = wordBoundaryLeft(in: line, from: caretColumn)
+            let position = buffer.delete(in: (
+                start: TextPosition(line: caretLine, column: startColumn),
+                end: TextPosition(line: caretLine, column: caretColumn)
+            ))
+            return (position.line, position.column)
+        }
+
+        guard caretLine > 0 else {
+            return (caretLine, caretColumn)
+        }
+
+        let previousLine = caretLine - 1
+        let previousText = buffer.lineText(at: previousLine)
+        let startColumn = wordBoundaryLeft(in: previousText, from: previousText.count)
+        let position = buffer.delete(in: (
+            start: TextPosition(line: previousLine, column: startColumn),
+            end: TextPosition(line: caretLine, column: 0)
+        ))
+        return (position.line, position.column)
+    }
+
     private func clampedLineSpan(_ lines: ClosedRange<Int>) -> (start: Int, count: Int) {
         if lines.upperBound >= buffer.indexedLineCount && !buffer.isFullyIndexed {
             buffer.ensureFullyIndexed()
@@ -2887,6 +2979,10 @@ final class FastFileView: NSView {
         setNeedsDisplay(bounds)
     }
 
+    func goToLine(_ oneBasedLine: Int) {
+        moveCaret(line: max(0, oneBasedLine - 1), column: 0)
+    }
+
     private func moveCaret(line: Int, column: Int, extending: Bool = false) {
         let oldLine = caretLine
         let oldPosition = currentPosition()
@@ -2915,6 +3011,10 @@ final class FastFileView: NSView {
             displayVisibleRect()
         }
         return Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+    }
+
+    func benchmarkCaretPosition() -> TextPosition {
+        currentPosition()
     }
 
     func attach(to scrollView: NSScrollView) {
@@ -3039,6 +3139,13 @@ final class FastFileView: NSView {
             }
         }
 
+        func expectLine(_ label: String, line: Int, text expectedText: String) {
+            let actual = buffer.lineText(at: line)
+            if actual != expectedText {
+                failures.append("\(label): expected \(expectedText.debugDescription), got \(actual.debugDescription)")
+            }
+        }
+
         moveCaret(line: 0, column: 0)
         expect("file start", line: 0, column: 0)
 
@@ -3101,6 +3208,20 @@ final class FastFileView: NSView {
         moveCaret(line: 1, column: 15)
         keyDown(with: keyEvent(flags: .command, keyCode: 125))
         expect("command down clamps preserved column", line: 2, column: 9)
+
+        moveCaret(line: 0, column: 16)
+        keyDown(with: keyEvent(flags: .option, keyCode: 51))
+        expect("option backspace deletes previous word", line: 0, column: 11)
+        expectLine("option backspace removes word", line: 0, text: "alpha beta,")
+
+        keyDown(with: keyEvent(flags: .option, keyCode: 51))
+        expect("option backspace deletes word plus punctuation", line: 0, column: 6)
+        expectLine("option backspace removes word plus punctuation", line: 0, text: "alpha ")
+
+        moveCaret(line: 2, column: 4)
+        keyDown(with: keyEvent(flags: .command, keyCode: 51))
+        expect("command backspace deletes to line start", line: 2, column: 0)
+        expectLine("command backspace removes line prefix", line: 2, text: " line")
 
         return failures
     }
@@ -3805,6 +3926,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
     private var pendingInvocations: [String: PendingInvocation] = [:]
     private var socketServer: SocketServer?
     private var benchmarkPath: String?
+    private var isReadyForLaunchServicesOpen = false
+    private var queuedLaunchServicesOpenPaths: [String] = []
     private var isRunningBenchmark = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -3838,6 +3961,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
             _ = open(paths: startupPaths, invocationID: nil)
         }
 
+        isReadyForLaunchServicesOpen = true
+        openQueuedLaunchServicesFiles()
+
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -3864,6 +3990,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
             send(OpenResponse(ok: true, message: "app quit"), to: invocation.fd, closeAfterWrite: true)
         }
         socketServer?.stop()
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        let response = openLaunchServicesFiles(filenames)
+        sender.reply(toOpenOrPrint: response.ok ? .success : .failure)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -3902,6 +4033,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
 
     @objc private func closeCurrentTab(_ sender: Any?) {
         guard let item = tabView.selectedTabViewItem else { return }
+        if tabView.numberOfTabViewItems == 1 {
+            window.performClose(sender)
+            return
+        }
         close(item: item)
     }
 
@@ -4344,32 +4479,153 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         return failures
     }
 
+    func benchmarkOpenTargets(path: String, secondPath: String) -> [String] {
+        buildMenu()
+        configureWindow()
+        window.setFrame(NSRect(x: 0, y: 0, width: 640, height: 360), display: false)
+        var failures: [String] = []
+
+        let targetLine = 3
+        let response = open(targets: [OpenTarget(path: path, line: targetLine)], invocationID: nil)
+        if !response.ok {
+            failures.append("open target failed: \(response.message)")
+            return failures
+        }
+
+        guard let document = documentsByPath[path] else {
+            failures.append("line-target document was not registered")
+            return failures
+        }
+
+        let position = document.fileView.benchmarkCaretPosition()
+        if position != TextPosition(line: targetLine - 1, column: 0) {
+            failures.append("line target expected \(targetLine - 1):0, got \(position.line):\(position.column)")
+        }
+        if tabView.numberOfTabViewItems != 1 {
+            failures.append("line target should open exactly one tab, got \(tabView.numberOfTabViewItems)")
+        }
+
+        let focusResponse = open(targets: [OpenTarget(path: path, line: 1)], invocationID: nil)
+        if !focusResponse.ok {
+            failures.append("existing target focus failed: \(focusResponse.message)")
+            return failures
+        }
+        if tabView.numberOfTabViewItems != 1 {
+            failures.append("opening an existing path should not duplicate tabs, got \(tabView.numberOfTabViewItems)")
+        }
+        let focusedPosition = document.fileView.benchmarkCaretPosition()
+        if focusedPosition != TextPosition(line: 0, column: 0) {
+            failures.append("existing target line expected 0:0, got \(focusedPosition.line):\(focusedPosition.column)")
+        }
+
+        let secondResponse = open(paths: [secondPath], invocationID: nil)
+        if !secondResponse.ok {
+            failures.append("second open failed: \(secondResponse.message)")
+            return failures
+        }
+        if tabView.numberOfTabViewItems != 2 {
+            failures.append("second path should create a second tab, got \(tabView.numberOfTabViewItems)")
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.layoutIfNeeded()
+        closeCurrentTab(nil)
+        if tabView.numberOfTabViewItems != 1 {
+            failures.append("Cmd-W with multiple tabs should close one tab, got \(tabView.numberOfTabViewItems)")
+        }
+        if documentsByPath[secondPath] != nil {
+            failures.append("Cmd-W with multiple tabs should unregister the selected tab")
+        }
+        if !window.isVisible {
+            failures.append("Cmd-W with multiple tabs should keep the window open")
+        }
+
+        closeCurrentTab(nil)
+        if window.isVisible {
+            failures.append("Cmd-W with one tab should close the window")
+        }
+
+        return failures
+    }
+
+    func benchmarkLaunchServicesOpen(path: String) -> [String] {
+        buildMenu()
+        configureWindow()
+        isReadyForLaunchServicesOpen = true
+        var failures: [String] = []
+
+        let response = openLaunchServicesFiles([path])
+        if !response.ok {
+            failures.append("Launch Services open failed: \(response.message)")
+            return failures
+        }
+        if documentsByPath[path] == nil {
+            failures.append("Launch Services open did not register the document")
+        }
+        if tabView.numberOfTabViewItems != 1 {
+            failures.append("Launch Services open expected one tab, got \(tabView.numberOfTabViewItems)")
+        }
+
+        return failures
+    }
+
     private func handle(request: OpenRequest, responseFD fd: Int32) {
-        let opened = open(paths: request.paths, invocationID: request.invocationID)
+        let opened = open(targets: request.targets, invocationID: request.invocationID)
         guard opened.ok else {
             send(opened, to: fd, closeAfterWrite: true)
             return
         }
 
+        let paths = request.targets.map(\.path)
         if request.wait {
             pendingInvocations[request.invocationID] = PendingInvocation(
                 id: request.invocationID,
-                paths: Set(request.paths),
+                paths: Set(paths),
                 fd: fd
             )
             send(OpenResponse(ok: true, message: "opened; waiting for tabs to close"), to: fd, closeAfterWrite: false)
         } else {
-            send(OpenResponse(ok: true, message: "opened \(request.paths.count) file(s)"), to: fd, closeAfterWrite: true)
+            send(OpenResponse(ok: true, message: "opened \(request.targets.count) file(s)"), to: fd, closeAfterWrite: true)
         }
     }
 
+    @discardableResult
+    private func openLaunchServicesFiles(_ filenames: [String]) -> OpenResponse {
+        let paths = filenames.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        guard !paths.isEmpty else {
+            return OpenResponse(ok: true, message: "opened")
+        }
+
+        guard isReadyForLaunchServicesOpen else {
+            queuedLaunchServicesOpenPaths.append(contentsOf: paths)
+            return OpenResponse(ok: true, message: "queued")
+        }
+
+        return open(paths: paths, invocationID: nil)
+    }
+
+    private func openQueuedLaunchServicesFiles() {
+        guard !queuedLaunchServicesOpenPaths.isEmpty else { return }
+        let paths = queuedLaunchServicesOpenPaths
+        queuedLaunchServicesOpenPaths.removeAll(keepingCapacity: true)
+        _ = open(paths: paths, invocationID: nil)
+    }
+
     private func open(paths: [String], invocationID: String?) -> OpenResponse {
+        open(targets: paths.map { OpenTarget(path: $0, line: nil) }, invocationID: invocationID)
+    }
+
+    private func open(targets: [OpenTarget], invocationID: String?) -> OpenResponse {
         var selectedDocument: TabDocument?
 
-        for path in paths {
+        for target in targets {
+            let path = target.path
             if let existing = documentsByPath[path] {
                 if let invocationID {
                     existing.waitingInvocations.insert(invocationID)
+                }
+                if let line = target.line {
+                    existing.fileView.goToLine(line)
                 }
                 selectedDocument = existing
                 continue
@@ -4385,6 +4641,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
                 documentsByPath[path] = document
                 documentsByItem[document.item] = document
                 tabView.addTabViewItem(document.item)
+                if let line = target.line {
+                    document.fileView.goToLine(line)
+                }
                 selectedDocument = document
                 fputs(String(format: "ArtisanApp: opened %@ in %.2fms\n", path, elapsedMS), stderr)
             } catch {
@@ -5717,6 +5976,53 @@ func runTabNavigationBenchmarkIfRequested() {
     exit(0)
 }
 
+@MainActor
+func runOpenTargetsBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-open-targets"),
+          args.indices.contains(modeIndex + 2)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    let secondPath = URL(fileURLWithPath: args[modeIndex + 2]).standardizedFileURL.path
+    _ = NSApplication.shared
+    let controller = AppController()
+    let failures = controller.benchmarkOpenTargets(path: path, secondPath: secondPath)
+    if !failures.isEmpty {
+        for failure in failures {
+            fputs("benchmark error: \(failure)\n", stderr)
+        }
+        exit(1)
+    }
+    print("benchmark.open_targets=PASS")
+    exit(0)
+}
+
+@MainActor
+func runLaunchServicesOpenBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-launch-services-open"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    _ = NSApplication.shared
+    let controller = AppController()
+    let failures = controller.benchmarkLaunchServicesOpen(path: path)
+    if !failures.isEmpty {
+        for failure in failures {
+            fputs("benchmark error: \(failure)\n", stderr)
+        }
+        exit(1)
+    }
+    print("benchmark.launch_services_open=PASS")
+    exit(0)
+}
+
 func runPreferencesBenchmarkIfRequested() {
     let args = CommandLine.arguments
     guard let modeIndex = args.firstIndex(of: "--benchmark-preferences"),
@@ -5860,6 +6166,8 @@ runWebScriptingHighlightingBenchmarkIfRequested()
 runBuildConfigHighlightingBenchmarkIfRequested()
 runHorizontalCaretVisibilityBenchmarkIfRequested()
 runTabNavigationBenchmarkIfRequested()
+runOpenTargetsBenchmarkIfRequested()
+runLaunchServicesOpenBenchmarkIfRequested()
 runPreferencesBenchmarkIfRequested()
 runEditorCoreBenchmarkIfRequested()
 

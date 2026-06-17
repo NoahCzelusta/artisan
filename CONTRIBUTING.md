@@ -1,58 +1,26 @@
 # Contributing
 
-Artisan is a native macOS quick-edit editor. The project optimizes for fast startup, predictable file editing, and a small product surface.
+Artisan is public as a reference implementation and product example. External contributions are not currently supported.
 
-## Development Setup
+If you want a similar editor, fork the repository or use `SPEC.md` as a prompt/specification for your own coding agent. You do not need to preserve this repo's implementation choices.
 
-Requirements:
+## Project Direction
 
-- macOS 14 or newer
-- Xcode command line tools with Swift 6
-- Homebrew
-- `ripgrep`
+The product boundary is intentional:
 
-Build and run the production CLI:
-
-```bash
-swift build -c release
-.build/release/artisan README.md
-```
-
-Build a local app bundle:
-
-```bash
-scripts/build-artisan-app.sh
-open -n .build/release/Artisan.app --args "$PWD/README.md"
-```
-
-## Verification
-
-Run the full local gate before opening or merging a PR:
-
-```bash
-scripts/run-ci.sh
-```
-
-For performance-sensitive changes, also run:
-
-```bash
-scripts/run-benchmarks.sh
-```
+- Native macOS quick-edit editor.
+- Existing-file CLI workflow.
+- Fast launch and responsive large-file editing.
+- No language servers, project indexing, extensions, terminal, Git UI, or AI/chat integration.
 
 ## Pull Requests
 
-- `main` is protected. Use pull requests for changes.
-- PRs must pass the `SwiftPM checks` GitHub Actions gate before merging.
-- Keep changes focused.
-- Include verification in the PR description.
-- Preserve the product boundary: no language servers, background indexing, extension system, terminal, Git UI, or AI/chat integration.
-- Use `docs/adr/` for durable architecture decisions.
-- Update `CONTEXT.md` when product language changes.
+Pull requests are used for maintainer workflow because `main` is protected. Unsolicited external PRs may be closed without review.
 
-## Releases
+## Issues
 
-Releases are tag-driven and documented in `docs/distribution.md`. Repo-local release instructions live in `skills/cut-artisan-release/SKILL.md`.
+GitHub Issues are used as the maintainer project tracker. Public issues may be closed if they are support requests, broad feature requests, or requests to change the core product boundary.
 
-## License
+## Building Your Own
 
-By contributing, you agree that your contributions are licensed under the MIT License.
+Start with `SPEC.md`. It is written so another agent or developer can build an Artisan-like app independently.

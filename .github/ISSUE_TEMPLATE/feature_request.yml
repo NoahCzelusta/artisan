@@ -1,5 +1,5 @@
-name: Feature request
-description: Suggest a focused Artisan improvement
+name: Maintainer feature
+description: Track a focused Artisan improvement
 title: "[Feature]: "
 labels: ["needs-triage"]
 body:
@@ -7,7 +7,7 @@ body:
     id: problem
     attributes:
       label: Problem
-      description: What workflow is difficult today?
+      description: What workflow is difficult today? Broad external feature requests may be closed without action.
     validations:
       required: true
   - type: textarea
