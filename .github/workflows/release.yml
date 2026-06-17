@@ -214,6 +214,16 @@ jobs:
               }
           fi
 
+          if gh pr merge "$branch" \
+            --repo "$GITHUB_REPOSITORY" \
+            --squash \
+            --delete-branch \
+            --auto; then
+            echo "Queued $branch for auto-merge after required checks and review."
+          else
+            echo "::warning::Could not queue $branch for auto-merge. Review and merge the cask update PR manually."
+          fi
+
       - name: Delete temporary signing keychain
         if: always()
         run: |

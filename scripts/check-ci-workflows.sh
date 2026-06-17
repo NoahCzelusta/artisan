@@ -32,6 +32,8 @@ rg -q 'pull-requests: write' "$RELEASE" || fail "release workflow must request p
 rg -q 'Allow GitHub Actions to create and approve pull requests' "$RELEASE" || fail "release workflow must explain the cask PR permission setting"
 rg -q 'Casks/artisan\.rb' "$RELEASE" || fail "release workflow must update the same-repo Homebrew cask"
 rg -q 'gh pr create' "$RELEASE" || fail "release workflow must open a cask update PR"
+rg -q 'gh pr merge "\$branch"' "$RELEASE" || fail "release workflow must queue the cask PR for auto-merge"
+rg -q -- '--auto' "$RELEASE" || fail "release workflow must use auto-merge for the cask PR"
 rg -q 'git push --force-with-lease origin "\$branch"' "$RELEASE" || fail "release workflow must update a cask PR branch"
 rg -q 'actions/upload-artifact@v6' "$RELEASE" || fail "release workflow must upload artifacts"
 

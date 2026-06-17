@@ -36,6 +36,7 @@ required_patterns=(
   "CI is configured"
   "MIT License"
   "cask update PR"
+  "auto-merge"
 )
 
 for pattern in "${required_patterns[@]}"; do
