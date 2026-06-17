@@ -18,7 +18,7 @@ Homebrew cask backed by GitHub Release assets.
   universal binary.
 - Tag releases in GitHub Actions use Developer ID signing, hardened runtime,
   notarization, stapling, and Gatekeeper validation.
-- The `0.0.3` Homebrew install path has been verified end to end, including
+- The `0.0.4` Homebrew install path has been verified end to end, including
   `artisan README.md`, `stapler`, `spctl`, and `brew audit`.
 - The repository is public and uses the MIT License.
 
@@ -66,6 +66,10 @@ CI is configured through GitHub Actions:
   creates a temporary `artisan-ci` notary profile, packages the release, and
   validates Gatekeeper acceptance before publishing assets and opening the
   cask update PR.
+- Repository Actions workflow permissions keep the default token permission at
+  read, but enable `can_approve_pull_request_reviews` so tag workflows can
+  create the cask update PR with their explicit `pull-requests: write` grant.
+  Branch protection still requires a human review before that PR merges.
 - `scripts/run-benchmarks.sh` remains the local product performance gate with
   the aggressive benchmark targets in `benchmarks/targets.env`.
 
@@ -233,7 +237,7 @@ artisan README.md
 artisan --wait README.md
 ```
 
-The `0.0.3` verification result is:
+The `0.0.4` verification result is:
 
 - `brew install --cask NoahCzelusta/artisan/artisan` succeeds.
 - `brew audit --cask NoahCzelusta/artisan/artisan` passes.
@@ -252,14 +256,17 @@ depends on.
 To publish a release:
 
 1. Ensure the worktree is clean and the benchmark gate passes.
-2. Create and push a tag such as `v0.0.1`.
-3. `.github/workflows/release.yml` packages the archive, checksum, and generated
+2. Confirm repository Actions workflow permissions allow PR creation:
+   `gh api repos/NoahCzelusta/artisan/actions/permissions/workflow` should
+   include `"can_approve_pull_request_reviews":true`.
+3. Create and push a tag such as `v0.0.1`.
+4. `.github/workflows/release.yml` packages the archive, checksum, and generated
    cask.
-4. For tag pushes, the workflow creates a GitHub Release and uploads the release
+5. For tag pushes, the workflow creates a GitHub Release and uploads the release
    assets.
-5. The workflow opens a cask update PR against `main`.
-6. After the cask PR passes CI and is reviewed, merge it.
-7. Run the Homebrew install proof from the public tap.
+6. The workflow opens a cask update PR against `main`.
+7. After the cask PR passes CI and is reviewed, merge it.
+8. Run the Homebrew install proof from the public tap.
 
 ## Deferred Decisions
 

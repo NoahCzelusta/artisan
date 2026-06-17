@@ -194,6 +194,7 @@ jobs:
           This PR is opened by the release workflow so protected \`main\` can require PRs while keeping the cask update auditable.
           BODY
           )"
+          pr_permission_message="Could not open the cask update PR. Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests."
 
           if gh pr view "$branch" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh pr edit "$branch" \
@@ -206,7 +207,11 @@ jobs:
               --base main \
               --head "$branch" \
               --title "$title" \
-              --body "$body"
+              --body "$body" || {
+                echo "::error::$pr_permission_message"
+                echo "$pr_permission_message" >&2
+                exit 1
+              }
           fi
 
       - name: Delete temporary signing keychain
