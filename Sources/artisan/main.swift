@@ -1,10 +1,48 @@
 import Darwin
 import Foundation
 
+struct OpenTarget: Codable, Hashable {
+    let path: String
+    let line: Int?
+}
+
 struct OpenRequest: Codable {
     let invocationID: String
-    let paths: [String]
+    let targets: [OpenTarget]
     let wait: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case invocationID
+        case targets
+        case paths
+        case wait
+    }
+
+    init(invocationID: String, targets: [OpenTarget], wait: Bool) {
+        self.invocationID = invocationID
+        self.targets = targets
+        self.wait = wait
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        invocationID = try container.decode(String.self, forKey: .invocationID)
+        wait = try container.decode(Bool.self, forKey: .wait)
+        if let targets = try container.decodeIfPresent([OpenTarget].self, forKey: .targets) {
+            self.targets = targets
+        } else {
+            let paths = try container.decode([String].self, forKey: .paths)
+            self.targets = paths.map { OpenTarget(path: $0, line: nil) }
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(invocationID, forKey: .invocationID)
+        try container.encode(targets, forKey: .targets)
+        try container.encode(targets.map(\.path), forKey: .paths)
+        try container.encode(wait, forKey: .wait)
+    }
 }
 
 struct OpenResponse: Codable {
@@ -13,9 +51,36 @@ struct OpenResponse: Codable {
 }
 
 let socketPath = "/tmp/artisan-\(getuid()).sock"
+let usageLine = "usage: artisan [--wait] <existing-file[:line]> [existing-file[:line]...]\n"
 
 func usage() -> Never {
-    fputs("usage: artisan [--wait] <existing-file> [existing-file...]\n", stderr)
+    fputs(usageLine, stderr)
+    exit(64)
+}
+
+func help() -> Never {
+    fputs("""
+    \(usageLine)
+    Open existing files in Artisan.
+
+    Arguments:
+      existing-file[:line]  Existing file to open. Line numbers are one-based.
+
+    Options:
+      --wait                Block until every file from this invocation closes.
+      -h, --help, help      Show this help.
+
+    Examples:
+      artisan README.md
+      artisan Sources/App.swift:42
+      artisan --wait README.md Sources/App.swift:42
+    """, stdout)
+    exit(0)
+}
+
+func failUsage(_ message: String) -> Never {
+    fputs("artisan: \(message)\n", stderr)
+    fputs(usageLine, stderr)
     exit(64)
 }
 
@@ -152,7 +217,51 @@ func readLineFromFD(_ fd: Int32) -> String? {
     }
 }
 
+func resolvedPath(_ argument: String, relativeTo currentDirectory: URL) -> String {
+    URL(fileURLWithPath: argument, relativeTo: currentDirectory).standardizedFileURL.path
+}
+
+func fileState(path: String) -> (exists: Bool, isDirectory: Bool) {
+    var isDirectory: ObjCBool = false
+    let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+    return (exists, isDirectory.boolValue)
+}
+
+func parseTarget(_ argument: String, relativeTo currentDirectory: URL) -> OpenTarget {
+    let fullPath = resolvedPath(argument, relativeTo: currentDirectory)
+    if fileState(path: fullPath).exists {
+        return OpenTarget(path: fullPath, line: nil)
+    }
+
+    guard let separator = argument.lastIndex(of: ":") else {
+        return OpenTarget(path: fullPath, line: nil)
+    }
+
+    let pathPart = String(argument[..<separator])
+    let linePart = String(argument[argument.index(after: separator)...])
+    guard !pathPart.isEmpty else {
+        return OpenTarget(path: fullPath, line: nil)
+    }
+
+    let path = resolvedPath(pathPart, relativeTo: currentDirectory)
+    if let line = Int(linePart) {
+        guard line > 0 else {
+            failUsage("invalid line in argument: \(argument)")
+        }
+        return OpenTarget(path: path, line: line)
+    }
+
+    if fileState(path: path).exists {
+        failUsage("invalid line in argument: \(argument)")
+    }
+    return OpenTarget(path: fullPath, line: nil)
+}
+
 var args = Array(CommandLine.arguments.dropFirst())
+if let first = args.first, first == "help" || first == "--help" || first == "-h" {
+    help()
+}
+
 let shouldWait: Bool
 if args.first == "--wait" {
     shouldWait = true
@@ -161,24 +270,30 @@ if args.first == "--wait" {
     shouldWait = false
 }
 
+if let first = args.first, first == "help" || first == "--help" || first == "-h" {
+    help()
+}
+
+if args.first == "--" {
+    args.removeFirst()
+}
+
 guard !args.isEmpty else {
     usage()
 }
 
 let currentDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-let paths = args.map { argument in
-    URL(fileURLWithPath: argument, relativeTo: currentDirectory).standardizedFileURL.path
-}
+let targets = args.map { parseTarget($0, relativeTo: currentDirectory) }
 
-for path in paths {
-    var isDirectory: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-        fputs("artisan: file does not exist: \(path)\n", stderr)
+for target in targets {
+    let state = fileState(path: target.path)
+    guard state.exists, !state.isDirectory else {
+        fputs("artisan: file does not exist: \(target.path)\n", stderr)
         exit(66)
     }
 }
 
-let request = OpenRequest(invocationID: UUID().uuidString, paths: paths, wait: shouldWait)
+let request = OpenRequest(invocationID: UUID().uuidString, targets: targets, wait: shouldWait)
 let fd = connectWithRetry()
 defer { close(fd) }
 

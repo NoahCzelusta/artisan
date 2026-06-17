@@ -49,13 +49,17 @@ The CLI must support:
 ```bash
 artisan file
 artisan file_a file_b
+artisan file:line
 artisan --wait file
 artisan --wait file_a file_b
+artisan help
 ```
 
 Requirements:
 
 - Resolve paths relative to the shell current working directory before handoff.
+- Support per-file one-based line targets with `file:line`.
+- Reject non-positive or non-numeric line targets when the file path before `:line` exists.
 - Reject missing files.
 - Reject directories.
 - Never create an unsaved buffer for a missing path.
@@ -63,6 +67,8 @@ Requirements:
 - With `--wait`, block until every file from that invocation closes, or until the app exits.
 - If the app is already open, a new invocation adds or focuses tabs in the existing window.
 - If a requested file is already open, focus the existing tab instead of duplicating it.
+- If a line target is provided for an already-open file, focus the existing tab and move its caret to that line.
+- Provide `help`, `--help`, and `-h` without launching the app.
 - CLI overhead before app handoff should be under 50 ms.
 
 ## Editor Session
@@ -190,6 +196,8 @@ Performance targets should be enforced with reproducible benchmarks.
 Required benchmark paths:
 
 - CLI open of an existing file.
+- CLI help and CLI line-target parsing.
+- App open-target caret placement.
 - Immediate scrollbar drag to bottom after open.
 - Trackpad or mouse-wheel style scrolling.
 - Keyboard navigation.
@@ -220,6 +228,7 @@ The preferred macOS distribution path:
 A build satisfies this spec when:
 
 - `artisan README.md` opens an existing file in a native macOS window.
+- `artisan README.md:12` opens `README.md` and moves the caret to line 12.
 - `artisan --wait README.md` blocks until the corresponding tab closes.
 - Missing files and directories fail before app handoff.
 - Multiple files open as tabs in one primary window.
