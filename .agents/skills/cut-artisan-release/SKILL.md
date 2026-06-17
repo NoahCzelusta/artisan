@@ -30,6 +30,19 @@ git fetch --tags origin
 git status -sb
 git tag --list 'v*' --sort=v:refname | tail -10
 sed -n '1,24p' Casks/artisan.rb
+gh api repos/NoahCzelusta/artisan/actions/permissions/workflow
+```
+
+The Actions workflow permissions output must include
+`"can_approve_pull_request_reviews":true`; despite the API field name, this is
+the repository setting that allows GitHub Actions to create the generated cask
+PR. If it is false and the user owns the repository, enable it without changing
+the default read permission:
+
+```bash
+gh api --method PUT repos/NoahCzelusta/artisan/actions/permissions/workflow \
+  -f default_workflow_permissions=read \
+  -F can_approve_pull_request_reviews=true
 ```
 
 2. Choose the version.
@@ -125,7 +138,7 @@ brew developer off
 
 - Missing signing or notary secrets: fix GitHub Secrets, then rerun or cut a new patch release depending on whether artifacts were published.
 - Workflow failure before release publication: inspect logs with `gh run view <run-id> --log-failed`.
-- Cask update PR missing: confirm the run was triggered by a tag, not `workflow_dispatch`.
+- Cask update PR missing: confirm the run was triggered by a tag, not `workflow_dispatch`, and verify `can_approve_pull_request_reviews` is true for repository Actions workflow permissions.
 - Homebrew installs an older version: run `brew update`, retap the repo, and inspect `Casks/artisan.rb`.
 - CLI cannot find `Artisan.app`: check `/opt/homebrew/bin/artisan` resolves into `/opt/homebrew/Caskroom/artisan/<version>/artisan` and rerun `scripts/check-cli-open-existing-files.sh`.
 

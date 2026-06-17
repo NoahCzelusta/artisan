@@ -29,6 +29,7 @@ rg -q 'ARTISAN_NOTARY_KEYCHAIN' "$RELEASE" || fail "release workflow must pass t
 rg -q 'spctl --assess' "$RELEASE" || fail "release workflow must validate Gatekeeper acceptance"
 rg -q 'gh release create' "$RELEASE" || fail "release workflow must create GitHub Releases for tags"
 rg -q 'pull-requests: write' "$RELEASE" || fail "release workflow must request pull request write permission"
+rg -q 'Allow GitHub Actions to create and approve pull requests' "$RELEASE" || fail "release workflow must explain the cask PR permission setting"
 rg -q 'Casks/artisan\.rb' "$RELEASE" || fail "release workflow must update the same-repo Homebrew cask"
 rg -q 'gh pr create' "$RELEASE" || fail "release workflow must open a cask update PR"
 rg -q 'git push --force-with-lease origin "\$branch"' "$RELEASE" || fail "release workflow must update a cask PR branch"

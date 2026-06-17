@@ -31,6 +31,7 @@ required_patterns=(
   "ARTISAN_NOTARY_KEYCHAIN_PROFILE"
   "ARTISAN_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64"
   "ARTISAN_NOTARY_API_KEY_BASE64"
+  "can_approve_pull_request_reviews"
   "dist/artisan.rb"
   "CI is configured"
   "MIT License"
