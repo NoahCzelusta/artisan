@@ -70,6 +70,8 @@ CI is configured through GitHub Actions:
   read, but enable `can_approve_pull_request_reviews` so tag workflows can
   create the cask update PR with their explicit `pull-requests: write` grant.
   Branch protection still requires a human review before that PR merges.
+- Repository auto-merge is enabled so the release workflow can queue the cask
+  update PR for merge after required checks and human review complete.
 - `scripts/run-benchmarks.sh` remains the local product performance gate with
   the aggressive benchmark targets in `benchmarks/targets.env`.
 
@@ -264,8 +266,9 @@ To publish a release:
    cask.
 5. For tag pushes, the workflow creates a GitHub Release and uploads the release
    assets.
-6. The workflow opens a cask update PR against `main`.
-7. After the cask PR passes CI and is reviewed, merge it.
+6. The workflow opens a cask update PR against `main` and queues it for
+   auto-merge.
+7. Review the cask PR after CI passes; auto-merge should finish the merge.
 8. Run the Homebrew install proof from the public tap.
 
 ## Deferred Decisions

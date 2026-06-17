@@ -73,7 +73,9 @@ gh run list --repo NoahCzelusta/artisan --workflow Release --limit 5
 gh run watch <run-id> --repo NoahCzelusta/artisan --exit-status
 ```
 
-The successful run must include signed artifact validation, GitHub Release publication, and same-repo cask PR creation.
+The successful run must include signed artifact validation, GitHub Release
+publication, same-repo cask PR creation, and a best-effort auto-merge queue for
+that cask PR. Auto-merge still waits for required checks and human review.
 
 6. Review and merge the generated cask PR.
 
@@ -81,12 +83,15 @@ The successful run must include signed artifact validation, GitHub Release publi
 gh pr list --repo NoahCzelusta/artisan --search "Update Homebrew cask for vX.Y.Z in:title"
 gh pr view <pr-number> --repo NoahCzelusta/artisan --web
 gh pr checks <pr-number> --repo NoahCzelusta/artisan --watch
-gh pr merge <pr-number> --repo NoahCzelusta/artisan --squash --delete-branch
+gh pr merge <pr-number> --repo NoahCzelusta/artisan --squash --delete-branch --auto
 git pull --ff-only
 sed -n '1,24p' Casks/artisan.rb
 ```
 
-Verify `Casks/artisan.rb` has the released version and sha256. If branch protection requires human approval and the agent cannot provide it, stop and ask the user to review or approve the cask PR.
+Verify `Casks/artisan.rb` has the released version and sha256 after the cask PR
+merges. If branch protection requires human approval and the agent cannot
+provide it, stop and ask the user to review or approve the cask PR; auto-merge
+should finish the merge once the approval lands.
 
 7. Inspect the GitHub Release.
 
