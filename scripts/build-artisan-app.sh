@@ -44,6 +44,93 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundleDisplayName</key>
   <string>$APP_NAME</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Text and Source Files</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.text</string>
+        <string>public.plain-text</string>
+        <string>public.source-code</string>
+        <string>public.shell-script</string>
+        <string>public.swift-source</string>
+        <string>public.python-script</string>
+        <string>public.ruby-script</string>
+        <string>public.php-script</string>
+        <string>public.json</string>
+        <string>public.yaml</string>
+        <string>public.xml</string>
+        <string>public.html</string>
+        <string>public.css</string>
+        <string>net.daringfireball.markdown</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>txt</string>
+        <string>text</string>
+        <string>md</string>
+        <string>markdown</string>
+        <string>ts</string>
+        <string>tsx</string>
+        <string>js</string>
+        <string>jsx</string>
+        <string>mjs</string>
+        <string>cjs</string>
+        <string>py</string>
+        <string>java</string>
+        <string>c</string>
+        <string>h</string>
+        <string>cpp</string>
+        <string>cc</string>
+        <string>cxx</string>
+        <string>hpp</string>
+        <string>cs</string>
+        <string>go</string>
+        <string>rs</string>
+        <string>php</string>
+        <string>rb</string>
+        <string>swift</string>
+        <string>kt</string>
+        <string>kts</string>
+        <string>sql</string>
+        <string>html</string>
+        <string>htm</string>
+        <string>css</string>
+        <string>sh</string>
+        <string>bash</string>
+        <string>zsh</string>
+        <string>fish</string>
+        <string>json</string>
+        <string>jsonc</string>
+        <string>yaml</string>
+        <string>yml</string>
+        <string>r</string>
+        <string>xml</string>
+        <string>toml</string>
+      </array>
+      <key>CFBundleTypeName</key>
+      <string>Text and Source File Extensions</string>
+      <key>CFBundleTypeOSTypes</key>
+      <array>
+        <string>TEXT</string>
+        <string>utxt</string>
+        <string>TUTX</string>
+        <string>****</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+    </dict>
+  </array>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

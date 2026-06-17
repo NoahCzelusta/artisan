@@ -3926,6 +3926,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
     private var pendingInvocations: [String: PendingInvocation] = [:]
     private var socketServer: SocketServer?
     private var benchmarkPath: String?
+    private var isReadyForLaunchServicesOpen = false
+    private var queuedLaunchServicesOpenPaths: [String] = []
     private var isRunningBenchmark = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -3959,6 +3961,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
             _ = open(paths: startupPaths, invocationID: nil)
         }
 
+        isReadyForLaunchServicesOpen = true
+        openQueuedLaunchServicesFiles()
+
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -3985,6 +3990,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
             send(OpenResponse(ok: true, message: "app quit"), to: invocation.fd, closeAfterWrite: true)
         }
         socketServer?.stop()
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        let response = openLaunchServicesFiles(filenames)
+        sender.reply(toOpenOrPrint: response.ok ? .success : .failure)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -4538,6 +4548,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         return failures
     }
 
+    func benchmarkLaunchServicesOpen(path: String) -> [String] {
+        buildMenu()
+        configureWindow()
+        isReadyForLaunchServicesOpen = true
+        var failures: [String] = []
+
+        let response = openLaunchServicesFiles([path])
+        if !response.ok {
+            failures.append("Launch Services open failed: \(response.message)")
+            return failures
+        }
+        if documentsByPath[path] == nil {
+            failures.append("Launch Services open did not register the document")
+        }
+        if tabView.numberOfTabViewItems != 1 {
+            failures.append("Launch Services open expected one tab, got \(tabView.numberOfTabViewItems)")
+        }
+
+        return failures
+    }
+
     private func handle(request: OpenRequest, responseFD fd: Int32) {
         let opened = open(targets: request.targets, invocationID: request.invocationID)
         guard opened.ok else {
@@ -4556,6 +4587,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         } else {
             send(OpenResponse(ok: true, message: "opened \(request.targets.count) file(s)"), to: fd, closeAfterWrite: true)
         }
+    }
+
+    @discardableResult
+    private func openLaunchServicesFiles(_ filenames: [String]) -> OpenResponse {
+        let paths = filenames.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        guard !paths.isEmpty else {
+            return OpenResponse(ok: true, message: "opened")
+        }
+
+        guard isReadyForLaunchServicesOpen else {
+            queuedLaunchServicesOpenPaths.append(contentsOf: paths)
+            return OpenResponse(ok: true, message: "queued")
+        }
+
+        return open(paths: paths, invocationID: nil)
+    }
+
+    private func openQueuedLaunchServicesFiles() {
+        guard !queuedLaunchServicesOpenPaths.isEmpty else { return }
+        let paths = queuedLaunchServicesOpenPaths
+        queuedLaunchServicesOpenPaths.removeAll(keepingCapacity: true)
+        _ = open(paths: paths, invocationID: nil)
     }
 
     private func open(paths: [String], invocationID: String?) -> OpenResponse {
@@ -5947,6 +6000,29 @@ func runOpenTargetsBenchmarkIfRequested() {
     exit(0)
 }
 
+@MainActor
+func runLaunchServicesOpenBenchmarkIfRequested() {
+    let args = CommandLine.arguments
+    guard let modeIndex = args.firstIndex(of: "--benchmark-launch-services-open"),
+          args.indices.contains(modeIndex + 1)
+    else {
+        return
+    }
+
+    let path = URL(fileURLWithPath: args[modeIndex + 1]).standardizedFileURL.path
+    _ = NSApplication.shared
+    let controller = AppController()
+    let failures = controller.benchmarkLaunchServicesOpen(path: path)
+    if !failures.isEmpty {
+        for failure in failures {
+            fputs("benchmark error: \(failure)\n", stderr)
+        }
+        exit(1)
+    }
+    print("benchmark.launch_services_open=PASS")
+    exit(0)
+}
+
 func runPreferencesBenchmarkIfRequested() {
     let args = CommandLine.arguments
     guard let modeIndex = args.firstIndex(of: "--benchmark-preferences"),
@@ -6091,6 +6167,7 @@ runBuildConfigHighlightingBenchmarkIfRequested()
 runHorizontalCaretVisibilityBenchmarkIfRequested()
 runTabNavigationBenchmarkIfRequested()
 runOpenTargetsBenchmarkIfRequested()
+runLaunchServicesOpenBenchmarkIfRequested()
 runPreferencesBenchmarkIfRequested()
 runEditorCoreBenchmarkIfRequested()
 

@@ -11,6 +11,7 @@ checks=(
   scripts/check-product-spec.sh
   scripts/check-plain-text-rendering.sh
   scripts/check-cli-open-existing-files.sh
+  scripts/check-launch-services-document-types.sh
   scripts/check-cli-wait.sh
   scripts/check-edit-operations.sh
   scripts/check-save-operations.sh
