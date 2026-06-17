@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# The full gate intentionally exercises app launch/open/close behavior. Keep
-# those windows offscreen unless a caller explicitly opts into visible UI.
+# This is the default local validation path. It avoids checks that intentionally
+# launch, activate, or close the macOS app window.
 export ARTISAN_QUIET_UI="${ARTISAN_QUIET_UI:-1}"
 
 checks=(
@@ -14,9 +14,6 @@ checks=(
   scripts/check-release-distribution-plan.sh
   scripts/check-product-spec.sh
   scripts/check-plain-text-rendering.sh
-  scripts/check-cli-open-existing-files.sh
-  scripts/check-launch-services-document-types.sh
-  scripts/check-cli-wait.sh
   scripts/check-edit-operations.sh
   scripts/check-save-operations.sh
   scripts/check-disk-change-save.sh
@@ -33,9 +30,7 @@ checks=(
   scripts/check-web-scripting-highlighting.sh
   scripts/check-build-config-highlighting.sh
   scripts/check-horizontal-caret-visibility.sh
-  scripts/check-tab-navigation.sh
   scripts/check-minimal-preferences.sh
-  scripts/check-editor-core.sh
   scripts/check-local-install-packaging.sh
   scripts/check-release-package.sh
 )
@@ -46,4 +41,4 @@ for check in "${checks[@]}"; do
   "$ROOT_DIR/$check"
 done
 
-echo "ci checks passed"
+echo "quiet local checks passed"

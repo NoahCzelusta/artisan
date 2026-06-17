@@ -18,6 +18,8 @@ rg -q 'brew install ripgrep' "$CI" || fail "CI must install ripgrep for repo che
 rg -q 'scripts/run-ci\.sh' "$CI" || fail "CI must call scripts/run-ci.sh"
 rg -q 'actions/upload-artifact@v6' "$CI" || fail "CI must upload dry-run package artifacts"
 rg -q 'scripts/check-release-package\.sh' "$CI" || fail "CI must produce a release package dry run"
+test -x "$ROOT_DIR/scripts/check.sh" || fail "quiet local check runner must exist and be executable"
+rg -q 'ARTISAN_QUIET_UI' "$ROOT_DIR/scripts/run-ci.sh" || fail "full local CI must suppress visible app activation by default"
 
 rg -q 'tags:' "$RELEASE" || fail "release workflow must run from tags"
 rg -q 'brew install ripgrep' "$RELEASE" || fail "release workflow must install ripgrep for repo check scripts"

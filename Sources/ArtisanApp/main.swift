@@ -3929,6 +3929,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
     private var isReadyForLaunchServicesOpen = false
     private var queuedLaunchServicesOpenPaths: [String] = []
     private var isRunningBenchmark = false
+    private let runsWithQuietUI = ProcessInfo.processInfo.environment["ARTISAN_QUIET_UI"] == "1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -3964,8 +3965,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         isReadyForLaunchServicesOpen = true
         openQueuedLaunchServicesFiles()
 
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        revealWindow()
 
         if let benchmarkPath {
             runBenchmark(path: benchmarkPath)
@@ -4002,10 +4002,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
     }
 
     func windowDidMove(_ notification: Notification) {
+        guard !runsWithQuietUI else { return }
         EditorPreferences.savedWindowFrame = window.frame
     }
 
     func windowDidResize(_ notification: Notification) {
+        guard !runsWithQuietUI else {
+            layoutTabBar()
+            scrollSelectedTabButtonIntoView()
+            return
+        }
         EditorPreferences.savedWindowFrame = window.frame
         layoutTabBar()
         scrollSelectedTabButtonIntoView()
@@ -4248,7 +4254,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
         window.title = "Artisan"
         window.isRestorable = false
         window.delegate = self
-        if let savedFrame = EditorPreferences.savedWindowFrame {
+        if runsWithQuietUI {
+            window.setFrame(quietWindowFrame(), display: false)
+        } else if let savedFrame = EditorPreferences.savedWindowFrame {
             window.setFrame(savedFrame, display: false)
         } else {
             window.center()
@@ -4527,7 +4535,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
             failures.append("second path should create a second tab, got \(tabView.numberOfTabViewItems)")
         }
 
-        window.makeKeyAndOrderFront(nil)
+        revealWindow()
         window.layoutIfNeeded()
         closeCurrentTab(nil)
         if tabView.numberOfTabViewItems != 1 {
@@ -4657,9 +4665,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSTabViewDelegate, N
             updateTabButtons()
         }
 
+        revealWindow()
+        return OpenResponse(ok: true, message: "opened")
+    }
+
+    private func quietWindowFrame() -> NSRect {
+        NSRect(x: -20_000, y: -20_000, width: 1000, height: 700)
+    }
+
+    private func revealWindow() {
+        if runsWithQuietUI {
+            window.setFrame(quietWindowFrame(), display: false)
+            window.orderBack(nil)
+            return
+        }
+
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        return OpenResponse(ok: true, message: "opened")
     }
 
     private func runBenchmark(path: String) {
