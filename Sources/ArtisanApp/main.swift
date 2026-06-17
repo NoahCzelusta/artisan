@@ -2096,6 +2096,10 @@ final class FastFileView: NSView {
                 break
             }
             switch event.keyCode {
+            case 51:
+                applyEdit(affectedLines: backwardDeleteLineRange()) {
+                    deleteSelectionIfNeeded() ?? deleteToLineStart()
+                }
             case 123:
                 moveToLineStart(extending: extendingSelection)
             case 124:
@@ -2112,6 +2116,10 @@ final class FastFileView: NSView {
 
         if event.modifierFlags.contains(.option) {
             switch event.keyCode {
+            case 51:
+                applyEdit(affectedLines: wordBackwardDeleteLineRange()) {
+                    deleteSelectionIfNeeded() ?? deleteWordBackward()
+                }
             case 123:
                 moveWordLeft(extending: extendingSelection)
             case 124:
@@ -2772,6 +2780,52 @@ final class FastFileView: NSView {
         return caretLine...caretLine
     }
 
+    private func wordBackwardDeleteLineRange() -> ClosedRange<Int> {
+        if let range = selectionLineRange() {
+            return range
+        }
+        if caretColumn == 0, caretLine > 0 {
+            return (caretLine - 1)...caretLine
+        }
+        return caretLine...caretLine
+    }
+
+    private func deleteToLineStart() -> (line: Int, column: Int) {
+        if caretColumn > 0 {
+            let position = buffer.delete(in: (
+                start: TextPosition(line: caretLine, column: 0),
+                end: TextPosition(line: caretLine, column: caretColumn)
+            ))
+            return (position.line, position.column)
+        }
+        return buffer.deleteBackward(atLine: caretLine, column: caretColumn)
+    }
+
+    private func deleteWordBackward() -> (line: Int, column: Int) {
+        if caretColumn > 0 {
+            let line = buffer.lineText(at: caretLine)
+            let startColumn = wordBoundaryLeft(in: line, from: caretColumn)
+            let position = buffer.delete(in: (
+                start: TextPosition(line: caretLine, column: startColumn),
+                end: TextPosition(line: caretLine, column: caretColumn)
+            ))
+            return (position.line, position.column)
+        }
+
+        guard caretLine > 0 else {
+            return (caretLine, caretColumn)
+        }
+
+        let previousLine = caretLine - 1
+        let previousText = buffer.lineText(at: previousLine)
+        let startColumn = wordBoundaryLeft(in: previousText, from: previousText.count)
+        let position = buffer.delete(in: (
+            start: TextPosition(line: previousLine, column: startColumn),
+            end: TextPosition(line: caretLine, column: 0)
+        ))
+        return (position.line, position.column)
+    }
+
     private func clampedLineSpan(_ lines: ClosedRange<Int>) -> (start: Int, count: Int) {
         if lines.upperBound >= buffer.indexedLineCount && !buffer.isFullyIndexed {
             buffer.ensureFullyIndexed()
@@ -3085,6 +3139,13 @@ final class FastFileView: NSView {
             }
         }
 
+        func expectLine(_ label: String, line: Int, text expectedText: String) {
+            let actual = buffer.lineText(at: line)
+            if actual != expectedText {
+                failures.append("\(label): expected \(expectedText.debugDescription), got \(actual.debugDescription)")
+            }
+        }
+
         moveCaret(line: 0, column: 0)
         expect("file start", line: 0, column: 0)
 
@@ -3147,6 +3208,20 @@ final class FastFileView: NSView {
         moveCaret(line: 1, column: 15)
         keyDown(with: keyEvent(flags: .command, keyCode: 125))
         expect("command down clamps preserved column", line: 2, column: 9)
+
+        moveCaret(line: 0, column: 16)
+        keyDown(with: keyEvent(flags: .option, keyCode: 51))
+        expect("option backspace deletes previous word", line: 0, column: 11)
+        expectLine("option backspace removes word", line: 0, text: "alpha beta,")
+
+        keyDown(with: keyEvent(flags: .option, keyCode: 51))
+        expect("option backspace deletes word plus punctuation", line: 0, column: 6)
+        expectLine("option backspace removes word plus punctuation", line: 0, text: "alpha ")
+
+        moveCaret(line: 2, column: 4)
+        keyDown(with: keyEvent(flags: .command, keyCode: 51))
+        expect("command backspace deletes to line start", line: 2, column: 0)
+        expectLine("command backspace removes line prefix", line: 2, text: " line")
 
         return failures
     }

@@ -126,6 +126,8 @@ Navigation:
 - Page Up / Page Down: move by viewport.
 - Home / End: move to current-line boundaries.
 - Ctrl-Tab / Ctrl-Shift-Tab: cycle session tabs and wrap around.
+- Option-Backspace: delete the previous word.
+- Command-Backspace: delete to the current-line start.
 
 Selection:
 
