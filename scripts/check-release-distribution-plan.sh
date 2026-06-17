@@ -25,6 +25,7 @@ required_patterns=(
   "homebrew-cask"
   "sha256"
   "scripts/package-release.sh"
+  "scripts/check.sh"
   ".github/workflows/ci.yml"
   ".github/workflows/release.yml"
   "ARTISAN_CODESIGN_IDENTITY"

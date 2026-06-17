@@ -57,6 +57,8 @@ CI is configured through GitHub Actions:
 
 - `scripts/run-ci.sh` runs the deterministic product, editor, highlighting,
   packaging, release-plan, and workflow checks.
+- `scripts/check.sh` is the default local validation path; it skips checks that
+  intentionally launch, activate, or close the app window.
 - `.github/workflows/ci.yml` runs on pull requests, pushes to `main`, and manual
   dispatch. It builds release products, runs `scripts/run-ci.sh`, creates a
   release-package dry run, and uploads the zip/checksum/generated cask as a

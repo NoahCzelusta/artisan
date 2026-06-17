@@ -31,11 +31,15 @@ Run the reproducible benchmark gate with:
 scripts/run-benchmarks.sh
 ```
 
-Run the deterministic CI gate locally with:
+Run the quiet local validation gate with:
 
 ```bash
-scripts/run-ci.sh
+scripts/check.sh
 ```
+
+This avoids checks that intentionally open and close the app window. The full
+CI gate is still available with `scripts/run-ci.sh`; it runs with quiet UI by
+default, but it exercises the real macOS app launch/open/close path.
 
 Build and open a file with the production CLI:
 
