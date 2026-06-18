@@ -27,8 +27,10 @@ test -f "$CASK_FILE" || fail "missing generated cask $CASK_FILE"
 
 (cd "$DIST_DIR" && shasum -a 256 -c "$(basename "$SHA_FILE")")
 unzip -l "$ARCHIVE" | rg -q 'Artisan\.app/Contents/Info\.plist' || fail "archive missing app bundle"
+unzip -l "$ARCHIVE" | rg -q 'Artisan\.app/Contents/Resources/AppIcon\.icns' || fail "archive missing app icon"
 unzip -l "$ARCHIVE" | rg -q '[[:space:]]artisan$' || fail "archive missing CLI binary"
 unzip -p "$ARCHIVE" "Artisan.app/Contents/Info.plist" | plutil -lint - >/dev/null || fail "archived Info.plist is invalid"
+unzip -p "$ARCHIVE" "Artisan.app/Contents/Info.plist" | plutil -p - | rg -q 'CFBundleIconFile' || fail "archived Info.plist missing icon key"
 ruby -c "$CASK_FILE" >/dev/null || fail "generated cask is not valid Ruby"
 rg -q "version \"$VERSION\"" "$CASK_FILE" || fail "generated cask has wrong version"
 rg -F -q 'v#{version}' "$CASK_FILE" || fail "generated cask URL must interpolate version"
