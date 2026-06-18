@@ -42,6 +42,7 @@ dist/
 .scratch/language-registry-fixtures/
 .scratch/launch-services-fixtures/
 .scratch/all-language-highlighting-fixtures/
+.scratch/app-icon.iconset/
 .scratch/build-config-highlighting-fixtures/
 .scratch/horizontal-caret-fixtures/
 .scratch/local-install-fixtures/
